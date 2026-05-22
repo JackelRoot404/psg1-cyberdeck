@@ -1,0 +1,154 @@
+# PSG1 cyberdeck repo .gitignore
+#
+# This file lives in the repo root. Its job is to keep proprietary firmware,
+# decompiled bytecode, third-party APKs, and personal credentials out of the
+# published repo as the project evolves.
+#
+# Workflow:
+#   1. Copy the contents of /tmp/psg1/publish/ into a fresh git repo.
+#   2. Inspect each file by eye before the first commit.
+#   3. After that, this .gitignore catches the obvious mistakes.
+
+# ============================================================
+# Third-party APKs and firmware artifacts
+# ============================================================
+*.apk
+*.aab
+*.xapk
+*.apks
+*.idsig
+*.dex
+*.odex
+*.vdex
+*.img
+*.bin
+*.fw
+*.elf
+*.so
+*.ozip
+*.ofp
+# Specific firmware names seen in this project
+boot.img
+recovery.img
+super.img
+vbmeta.img
+ota_signed.zip
+resources.arsc
+framework.jar
+services.jar
+Settings.apk
+
+# ============================================================
+# Decompiled source trees — proprietary IP, do not publish
+# ============================================================
+**/jadx_out/
+**/*_jadx/
+**/*_dex/
+**/smali/
+**/baksmali_out/
+
+# ============================================================
+# Build / extraction workspaces
+# ============================================================
+maliroot/build/
+maliroot/native/build/
+maliroot/debug.keystore
+rkbin/
+rkdeveloptool/
+ota_inspect/
+audit/
+backup/
+leak/
+claude_splits/
+
+# Vendored upstream repos — link to upstream rather than republishing
+securitylab/
+rish_dist/
+
+# ============================================================
+# Credentials and secrets — never commit
+# ============================================================
+*.key
+*.pem
+*.pfx
+*.p12
+*.keystore
+*.jks
+id_ed25519
+id_ed25519.*
+id_rsa
+id_rsa.*
+id_ecdsa
+id_ecdsa.*
+authorized_keys
+known_hosts
+*.crt
+*.csr
+*.gpg
+*.asc
+.env
+.env.*
+.envrc
+secrets/
+credentials/
+
+# Solana keypairs — JSON arrays of bytes
+id.json
+keypair.json
+*-keypair.json
+wallet.json
+solana-tools/id.json
+solana-tools/**/*.json
+
+# ============================================================
+# Local (unredacted) versions — must never be committed
+# These exist alongside the published copies during development; gitignore
+# them by exact name so a stray `git add -A` can't pull them in.
+# ============================================================
+PSG1_NOTES.local.md
+PSG1_CYBERDECK_OPS.local.md
+*.local.md
+*.private.md
+notes/
+local/
+.local/
+
+# ============================================================
+# Editor / OS / build cruft
+# ============================================================
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.log
+*.tmp
+*.bak
+.cache/
+
+# Node
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Rust
+target/
+
+# ============================================================
+# Anything matching obviously-personal patterns
+# ============================================================
+*serial*
+*device-id*
+*-mac.txt
+**/personal/
+**/private/
