@@ -37,6 +37,28 @@ Idempotent — safe to run any time. Updates packages, fixes config drift, re-ad
 | termux-api | termux-battery-status, termux-clipboard-get, termux-vibrate, etc. |
 | nodejs-lts | node, npm, npx |
 
+## Claude Code CLI
+
+- **The breakage:** Claude Code `v2.1.113+` stopped shipping as pure JavaScript and now installs a **glibc-native binary**. Termux is Android/**bionic** libc, so that binary won't run — `claude` dies with `Error: claude native binary not installed`. A routine `pkg upgrade` or `npm update -g` is enough to pull the broken build and "break" a previously-working CLI. (Tracked upstream: anthropics/claude-code#50270.)
+- **Termux path (pinned pure-JS).** `2.1.112` is the last pure-JS release and runs natively in Termux. The setup script installs and pins it (§9); to repair by hand:
+  ```sh
+  npm uninstall -g @anthropic-ai/claude-code
+  npm install -g @anthropic-ai/claude-code@2.1.112
+  claude --version
+  ```
+  If `2.1.112` has aged out of the registry, run `npm view @anthropic-ai/claude-code versions` and pick the highest `2.1.11x` **below 113**.
+- **Stop the silent re-break.** `export DISABLE_AUTOUPDATER=1` (added to `~/.bashrc` by the setup script) keeps the in-app updater from pulling a native build behind your back. Also don't run `npm update -g @anthropic-ai/claude-code`.
+- **Current-version path (glibc via chroot).** To run an up-to-date Claude Code, install it inside the Ubuntu chroot, where glibc is available:
+  ```sh
+  proot-distro login ubuntu
+  # inside ubuntu (needs node 18+; use nodesource/nvm if apt's node is too old):
+  apt update && apt install -y nodejs npm
+  npm install -g @anthropic-ai/claude-code
+  claude
+  ```
+  Bind in your Termux storage for shared files: `proot-distro login ubuntu --bind /sdcard:/sdcard`.
+- **Tradeoff:** pinned-in-Termux is one command and stays native, but freezes the version; the chroot stays current but adds the proot layer (heavier, separate filesystem).
+
 ## Shizuku
 
 - Manager APK: `moe.shizuku.privileged.api` (gets disabled by Echos boot — see "Reboot survival" below)
