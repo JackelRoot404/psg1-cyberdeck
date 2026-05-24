@@ -98,6 +98,9 @@ cat > "$HOME/.bashrc" <<'EOF'
 # PSG1 cyberdeck bashrc
 export EDITOR=nvim
 export PATH="$HOME/.local/bin:$HOME/bin:$PATH"
+# Keep Claude Code on the Termux-safe pure-JS build — stop the in-app updater
+# from silently pulling a glibc-native build that won't run on bionic (see §9).
+export DISABLE_AUTOUPDATER=1
 
 # History
 export HISTSIZE=10000
@@ -207,10 +210,27 @@ if ! command -v solana >/dev/null 2>&1; then
   fi
 fi
 
-# --- 9. Useful directories ---
+# --- 9. Claude Code CLI ---
+# Claude Code v2.1.113+ ships a glibc-native binary that will NOT run on Termux
+# (Android/bionic libc): `claude` dies with "native binary not installed".
+# 2.1.112 is the last pure-JS release and runs fine here, so we pin to it. The
+# in-app auto-updater is disabled in ~/.bashrc (§5) so it can't silently pull a
+# broken native build. To run a CURRENT Claude Code instead, install it inside
+# the Ubuntu chroot (glibc) — see PSG1_CYBERDECK_OPS.md → "Claude Code CLI".
+CLAUDE_PIN="2.1.112"
+log "Installing Claude Code CLI, pinned to $CLAUDE_PIN (Termux-safe pure-JS build)"
+if ! claude --version >/dev/null 2>&1; then
+  npm uninstall -g @anthropic-ai/claude-code >/dev/null 2>&1 || true
+  npm install -g "@anthropic-ai/claude-code@${CLAUDE_PIN}" || \
+    log "WARNING: Claude Code install failed — run it inside the Ubuntu chroot instead (see notes)"
+else
+  log "Claude Code already working: $(claude --version 2>/dev/null)"
+fi
+
+# --- 10. Useful directories ---
 mkdir -p "$HOME/dev" "$HOME/scratch" "$HOME/notes"
 
-# --- 10. Termux properties for better UX ---
+# --- 11. Termux properties for better UX ---
 log "Writing termux.properties for nicer keyboard"
 cat > "$HOME/.termux/termux.properties" <<'EOF'
 # Extra keys row — ESC, TAB, arrows, common keys
@@ -225,13 +245,13 @@ EOF
 
 termux-reload-settings 2>/dev/null || true
 
-# --- 11. Generate Termux's own SSH key so it can push to git etc. ---
+# --- 12. Generate Termux's own SSH key so it can push to git etc. ---
 if [ ! -f "$HOME/.ssh/id_ed25519" ]; then
   log "Generating Termux ed25519 keypair"
   ssh-keygen -t ed25519 -N '' -C "psg1@cyberdeck" -f "$HOME/.ssh/id_ed25519"
 fi
 
-# --- 12. Final status ---
+# --- 13. Final status ---
 echo
 log "==================== DONE ===================="
 echo

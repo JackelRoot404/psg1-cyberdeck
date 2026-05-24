@@ -30,8 +30,11 @@ ts="$(date '+%Y-%m-%d %H:%M:%S')"
 needed_action=0
 
 for pkg in "${PACKAGES[@]}"; do
-  state="$(adb shell "dumpsys package $pkg 2>/dev/null | grep -m1 'enabled=' | grep -oE 'enabled=[0-9]'" 2>/dev/null)"
-  if [ "$state" = "enabled=0" ] || [ "$state" = "enabled=2" ] || [ "$state" = "enabled=4" ]; then
+  state="$(adb shell "dumpsys package $pkg 2>/dev/null | grep -m1 'enabled=' | grep -oE 'enabled=[0-9]'" 2>/dev/null | tr -d '\r')"
+  # Re-enable on any non-enabled state. pm disable-user (the usual disable
+  # path on this device) sets enabled=3, which an old {0,2,4} allowlist missed.
+  # Empty state = package not installed for this user → skip it.
+  if [ -n "$state" ] && [ "$state" != "enabled=1" ]; then
     echo "[$ts] re-enabling $pkg (was $state)"
     adb shell "pm enable $pkg" >/dev/null
     needed_action=1
