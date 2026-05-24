@@ -130,6 +130,12 @@ eval "$(zoxide init bash 2>/dev/null)" || true
 # fzf keybindings
 [ -f "$PREFIX/share/fzf/key-bindings.bash" ] && source "$PREFIX/share/fzf/key-bindings.bash"
 
+# Ensure sshd is up when a Termux session opens — post-reboot recovery, since
+# Termux:Boot (10-sshd) is skipped when the firmware disables the package during
+# the boot window. The jumpbox keepalive cold-starts Termux to trigger this.
+# No-op if sshd is already running.
+command -v sshd >/dev/null && ! pgrep -x sshd >/dev/null 2>&1 && sshd 2>/dev/null
+
 # Welcome message
 if [ -z "${PSG1_WELCOMED:-}" ]; then
   export PSG1_WELCOMED=1

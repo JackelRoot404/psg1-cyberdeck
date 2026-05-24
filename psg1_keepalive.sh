@@ -60,6 +60,19 @@ if [ "$pdm" != "opportunistic" ] && [ "$pdm" != "off" ]; then
   needed_action=1
 fi
 
+# Bring Termux sshd back up after a reboot. Termux:Boot is skipped when the
+# package is disabled during the boot window, so once com.termux is enabled we
+# cold-start it: the fresh login session sources ~/.bashrc, whose guard line
+# (re)starts sshd. Checked over ADB so no device IP is needed; only acts when
+# sshd is actually down, so steady-state runs are a no-op.
+tstate="$(adb shell "dumpsys package com.termux 2>/dev/null | grep -m1 'enabled=' | grep -oE 'enabled=[0-9]'" 2>/dev/null | tr -d '\r')"
+sshd_listen="$(adb shell 'ss -ltn 2>/dev/null | grep :8022' 2>/dev/null | tr -d '\r')"
+if [ "$tstate" = "enabled=1" ] && [ -z "$sshd_listen" ]; then
+  echo "[$ts] Termux sshd not listening — cold-starting Termux so its ~/.bashrc guard restarts sshd"
+  adb shell 'input keyevent KEYCODE_WAKEUP; am start -n com.termux/.app.TermuxActivity' >/dev/null 2>&1
+  needed_action=1
+fi
+
 if [ $needed_action -eq 0 ]; then
   # Silent on no-op so the log doesn't fill up
   exit 0

@@ -134,9 +134,9 @@ If you ever want the CLI: cargo-build from source inside the Ubuntu chroot is th
 
 **WARNING:** PlaySolana firmware disables `com.termux`, `com.termux.boot`, `com.tailscale.ipn`, `moe.shizuku.privileged.api`, `app.lawnchair`, and more at every reboot. Disabled apps don't receive `BOOT_COMPLETED` → sshd won't start → device boots into "remotely unusable" state without intervention.
 
-**Mitigation:** Keepalive script (`psg1_keepalive.sh`, in the repo) on the jumpbox runs every 5 min via cron, re-enables disabled packages and re-asserts `always_on_vpn_app` + `private_dns_mode`. Silent when no action needed.
+**Mitigation:** Keepalive script (`psg1_keepalive.sh`, in the repo) on the jumpbox runs every 5 min via cron: re-enables disabled packages, re-asserts `always_on_vpn_app` + `private_dns_mode`, and — once `com.termux` is back — cold-starts Termux with `am start` whenever sshd isn't listening. The cold start opens a fresh login session that sources `~/.bashrc`, whose guard line restarts `sshd`. Net effect: **after a reboot, sshd self-recovers within ≤5 min, no manual step.** (Termux:Boot's `10-sshd` still can't fire — the package is disabled during the boot window — so this `am start` path is what actually brings sshd back.) Silent when no action needed.
 
-**Worst case (jumpbox unreachable + PSG1 rebooted):** open Termux on device manually, run `sshd`. Then open Tailscale, tap Connect. After that, the jumpbox is reachable again.
+**Worst case (jumpbox itself down + PSG1 rebooted):** the auto-recovery can't run, so fall back to manual — open Termux on the device, run `sshd`, then open Tailscale and tap Connect. After that the jumpbox is reachable again.
 
 ## What is NOT done
 
