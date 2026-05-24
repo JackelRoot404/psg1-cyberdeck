@@ -8,6 +8,7 @@ Documentation of the work I did to turn a PlaySolana PSG1 handheld into a person
 - **[PSG1_CYBERDECK_OPS.md](PSG1_CYBERDECK_OPS.md)** — how the device is configured day-to-day after conversion. Termux, sshd, Tailscale, Solana SDK, USB-C hub support.
 - **[psg1_termux_setup.sh](psg1_termux_setup.sh)** — idempotent bootstrap script that installs and configures everything on the Termux side. Edit `AUTHORIZED_PUBKEY` before running.
 - **[psg1_keepalive.sh](psg1_keepalive.sh)** — cron-friendly keepalive that re-enables packages PlaySolana firmware disables at every boot. Runs on a separate Linux machine acting as an ADB jumpbox.
+- **[psg1_install.sh](psg1_install.sh)** — sideload an APK (file or URL) from the jumpbox via the Echos-installer-spoof, bypassing the `no_install_unknown_sources` restriction. Push + install + cleanup in one command.
 
 ## Scope and disclaimers
 

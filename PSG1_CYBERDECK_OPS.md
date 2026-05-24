@@ -59,6 +59,15 @@ Idempotent — safe to run any time. Updates packages, fixes config drift, re-ad
   Bind in your Termux storage for shared files: `proot-distro login ubuntu --bind /sdcard:/sdcard`.
 - **Tradeoff:** pinned-in-Termux is one command and stays native, but freezes the version; the chroot stays current but adds the proot layer (heavier, separate filesystem).
 
+## Installing & updating apps
+
+On-device installers (F-Droid, Aurora, the package-installer UI) hit "Unknown apps can't be installed by this user" — the `no_install_unknown_sources` restriction on user 0. F-Droid can *download* updates but can't install them; everything goes through the jumpbox via the Echos-installer-spoof. Use the helper:
+```sh
+./psg1_install.sh <app.apk>                      # local file
+./psg1_install.sh https://f-droid.org/F-Droid.apk   # or a URL (e.g. F-Droid self-update)
+```
+It pushes, runs `pm install -r -i com.playsolana.echos`, and cleans up. For split-APK / `.xapk` bundles, merge to a universal APK first (see `PSG1_NOTES.md` → "For multi-APK apps"). If Echos was uninstalled for user 0 the spoof fails — restore with `adb shell pm install-existing --user 0 com.playsolana.echos`.
+
 ## Shizuku
 
 - Manager APK: `moe.shizuku.privileged.api` (gets disabled by Echos boot — see "Reboot survival" below)

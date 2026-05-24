@@ -214,6 +214,12 @@ These three surfaces (perf_event, bpf, io_uring) are documented kernel attack su
 - proot-distro Ubuntu chroot for anything needing glibc (Solana toolchains, etc.)
 
 ### How to install another app (the working bypass)
+Use the `psg1_install.sh` helper in the repo (push + spoof-install + cleanup, takes a file or URL):
+```
+./psg1_install.sh my.apk
+./psg1_install.sh https://f-droid.org/F-Droid.apk
+```
+Or by hand:
 ```
 adb push my.apk /data/local/tmp/
 adb shell 'pm install -i com.playsolana.echos /data/local/tmp/my.apk'
