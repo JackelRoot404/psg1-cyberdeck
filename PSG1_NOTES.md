@@ -57,11 +57,53 @@ The PSG1 is **locked at the silicon level**. PlaySolana burned the RK3588S secur
 | `modules_disabled` | 0 | Modules loadable (needs root, but worth noting) |
 | `/dev/mali0` perms | `crw-rw-rw-` | World-readable/writable file mode — BUT kbase rejects shell uid internally |
 | AVB | `verifiedbootstate=green`, `flash.locked=1` | Bootloader locked |
+| dm-verity | `veritymode=enforcing`, `restart_on_corruption`; bootreason `dm-verity_device_corrupted` | Tripped once on a since-removed DSU/GSI image — stock boot path is clean. See "dm-verity" below |
 | `ro.oem_unlock_supported` | 1 | Kernel says unlock is supported |
 | Bootloader unlock | **non-functional** | See section below |
 | Mali driver UID check | **rejects shell uid 2000** | `EPERM` on every Mali ioctl from shell |
 
 These knobs (permissive SELinux, KASLR off, perf/bpf open, dmesg readable) make this a notably less-defended Android 15 kernel than typical production devices ship with. The mitigations were dialed back, presumably so PlaySolana's own platform code could iterate faster — but the lowered guard-rails apply equally to anything else running on the device.
+
+### dm-verity — a one-time DSU/GSI corruption, not a boot-path fault
+
+A wrinkle that doesn't fit the clean "green/locked" line above. AVB reports `verifiedbootstate=green` and `veritymode=enforcing`, yet the most recent boot reason is `reboot,dm-verity_device_corrupted`:
+
+```
+ro.boot.verifiedbootstate   = green
+ro.boot.veritymode          = enforcing
+ro.boot.vbmeta.device_state = locked
+ro.boot.bootreason          = reboot,dm-verity_device_corrupted
+```
+
+That isn't a contradiction — AVB and dm-verity check different things at different times. AVB verifies the *signature* on the vbmeta/hashtree descriptor at boot; that passes (green). dm-verity verifies *data blocks* against that signed hashtree at runtime, on access; a `dm-verity_device_corrupted` reboot means a block read back with a hash that didn't match the tree, and dm-verity restarted the device.
+
+The previous boot's kernel log survives in pstore (`/sys/fs/pstore/console-ramoops-0`, readable from shell — it's in the `log` group — so no root needed) and pins down exactly what tripped:
+
+```
+init: [libfs_avb] Built verity table: '... dm-9 ... 440485 440485 sha256 587b3bad… 5329aea2…
+   10 use_fec_from_device /dev/block/dm-9 fec_roots 2 fec_blocks 443955 fec_start 443955
+   restart_on_corruption ignore_zero_blocks'
+device-mapper: verity-fec: 253:9: FEC: recursion too deep
+device-mapper: verity: 253:9: metadata block 440485 is corrupted
+reboot: Restarting system with command 'dm-verity device corrupted'
+```
+
+So the corruption mode is **`restart_on_corruption`** (not `eio`/log-and-continue). The corrupt device — dm-9 that boot, ~1.68 GB (440485 × 4096 B, an exact size match to today's `system-verity`) — was labelled **`system_gsi`** in the boot log, with `userdata_gsi` beside it. Those are **DSU (Dynamic System Update)** partitions. Forward error correction tried to rebuild hashtree metadata block 440485 and failed ("recursion too deep").
+
+The boot-reason history supplies the cause — a dead battery ~59 minutes earlier:
+
+```
+reboot,dm-verity_device_corrupted, <epoch>
+shutdown,battery,                  <epoch − ~59 min>
+```
+
+The likely sequence: a DSU/GSI install or boot was in flight when the battery died, leaving the `system_gsi` hashtree metadata half-written; on the next boot dm-verity couldn't verify it, FEC couldn't repair it, and `restart_on_corruption` rebooted.
+
+**It's not on the live boot path.** The GSI is gone — `gsi_tool status` returns `normal`, `gsid.image_installed=0`, `ro.gsid.image_running=0`, and there are no `*_gsi` device-mapper nodes this boot. The device boots the stock PlaySolana `system`, which verifies green and runs for hours. The `dm-verity_device_corrupted` bootreason persists only because nothing has rebooted since — a stale marker of that one DSU casualty, not an ongoing fault. `enforcing` + `restart_on_corruption` is just this device's normal verity config.
+
+**Reboot risk: low.** The image that tripped verity has been removed and nothing on the normal boot path is corrupt; the earlier boot-loop worry assumed the drift was in a live partition, which it isn't. Two caveats, to be honest: it hasn't actually been re-tested with a reboot, and `/metadata/gsi` (which would show residual DSU state) is root-gated, so "low," not "zero." The live dm-verity table and per-device verified/corrupted status are root-gated too (`/dev/device-mapper` is `crw------- root`) — which is why the pstore log was the way in.
+
+Found while validating the reboot-survival keepalive (below) — also why that tooling is best exercised by disabling a dormant package and letting cron re-enable it, not by power-cycling.
 
 ---
 
@@ -238,6 +280,8 @@ Single-file `pm install -i` doesn't work with split APKs — the `-i` attributio
 
 ### One catch — boot-time component disabler
 PlaySolana firmware disables `com.termux`, `com.termux.boot`, `com.tailscale.ipn`, `moe.shizuku.privileged.api`, `app.lawnchair` (and others) at every reboot via some system-level mechanism I have not pinpointed. Mitigation: a small `pm enable` keepalive script running on cron from a separate Linux machine that ADBs into the PSG1. Example script in the repo.
+
+The keepalive has to treat *any* non-`enabled=1` state as "re-enable," not a fixed allowlist: `pm disable-user` lands a package in `enabled=3` (`DISABLED_USER`), which an earlier `{0,2,4}` check silently skipped — so it no-op'd past disabled packages and never logged a thing. The boot-disabler's exact resulting state is unconfirmed (testing it by rebooting is discouraged — see the dm-verity note above; disable a dormant package and let cron re-enable it instead), but matching on "not enabled" covers whatever it uses.
 
 ---
 
