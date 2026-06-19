@@ -21,16 +21,25 @@ The PSG1 is **locked at the silicon level**. PlaySolana burned the RK3588S secur
 
 ## Hardware
 
+> Physical part numbers below are read off the bare board — see
+> [PSG1_MOTHERBOARD.md](PSG1_MOTHERBOARD.md) for the full teardown (board ID,
+> connector layout, photos-derived markings). Software still reports the SoC as
+> RK3588S (`evb_rk3588`); the die is actually RK3588S2 — same device to software.
+
 | | |
 |---|---|
-| SoC | Rockchip RK3588S |
+| SoC | Rockchip **RK3588S2** (die marking `RK3588S2 SBGYNYZZ1 2535`; software reports RK3588S-family) |
 | GPU | Mali-G610 r0p0 (Valhall) |
 | GPU driver banner | `mali fb000000.gpu: Kernel DDK version g25p0-00eac0` (r25p0) |
-| RAM/storage | eMMC ~119 GB, FBE encrypted |
+| RAM | 8 GB Micron LPDDR (two packages, FBGA `D8CTX`) |
+| Storage | 128 GB FORESEE eMMC (~119 GB usable, FBE encrypted) |
+| PMIC | Rockchip RK806-1 |
+| Wi-Fi / BT | Fn-Link N280A-SRL — Wi-Fi 6 (802.11ax) 1×1 dual-band + BT 5.4 (SDIO/UART) |
 | Form factor | Tablet (`ro.build.characteristics`) |
 | Fingerprint sensor | Goodix |
 | Secure element | Yes (StrongBox + SvalGuard TA) |
 | No cellular (`ro.boot.noril=true`) | |
+| Board | PSG1 V2.0, ID `PS01-2547-002-A2` (8+128G SKU) |
 
 ## Software
 
