@@ -16,8 +16,9 @@ and [PSG1_CYBERDECK_OPS.md](PSG1_CYBERDECK_OPS.md) (day-to-day config).
 
 PSG1 **V2.0** mainboard, board ID `PS01-2547-002-A2`. Built around a
 **Rockchip RK3588S2** (8-core, Mali-G610, ~6 TOPS NPU) with **8 GB LPDDR** and
-**128 GB eMMC** — the "8+128G" SKU per the back-of-board sticker. Onboard
-Wi-Fi/BT module, dual microSD, and a row of FPC ribbon connectors driving the
+**128 GB eMMC** — the "8+128G" SKU per the back-of-board sticker. Power is an
+**RK806-1** PMIC; wireless is an **Fn-Link N280A-SRL** Wi-Fi 6 + BT 5.4 module.
+Dual microSD, and a row of FPC ribbon connectors driving the
 display, touch, and controls. It's a high-end handheld SoC, well above the
 RK3326/RK3566 class used in budget retro devices.
 
@@ -29,6 +30,7 @@ RK3326/RK3566 class used in budget retro devices.
 |---|---|---|
 | Board ID | `PS01-2547-002-A2` | Front silkscreen, top-right |
 | Module marking | `PSG1 RK3588S2 V2.0N 2025.10.27` | Front silkscreen, center-right |
+| SoC die marking | `RK3588S2  SBGYNYZZ1  2535  9M52603` | Laser-etched on the SoC (lot `2535` = 2025 wk 35) |
 | Sticker | `PSG1 RK3588S2 V2.0 8+128G  2025-11-25  FS01219` | Back of board |
 | Hardware rev | **V2.0** | — |
 | Build / date code | `2025-11-25` | Back sticker (consistent with module silkscreen `2025.10.27`) |
@@ -38,12 +40,13 @@ RK3326/RK3566 class used in budget retro devices.
 
 `PSG1_NOTES.md` records the SoC as **RK3588S** because that's what the running
 software reports (`fastboot product: evb_rk3588`, the Mali/kernel banners). The
-physical board is marked **RK3588S2**. These are not a contradiction: the
-RK3588S2 is a cost-reduced respin of the RK3588S with a trimmed I/O complement
-(fewer high-speed lanes, one less display head) but **identical CPU/GPU/NPU
-compute**, and it presents to software the same way an RK3588S does. Treat
-"RK3588S" (software view) and "RK3588S2" (board marking) as the same device for
-all practical purposes.
+silicon itself is **RK3588S2** — confirmed by the laser-etched die marking
+(`RK3588S2 SBGYNYZZ1 2535`), not just the board silkscreen. These are not a
+contradiction: the RK3588S2 is a cost-reduced respin of the RK3588S with a
+trimmed I/O complement (fewer high-speed lanes, one less display head) but
+**identical CPU/GPU/NPU compute**, and it presents to software the same way an
+RK3588S does (hence `evb_rk3588`). Treat "RK3588S" (software view) and
+"RK3588S2" (the actual part) as the same device for all practical purposes.
 
 ---
 
@@ -51,11 +54,11 @@ all practical purposes.
 
 | Part | Marking / ID | Notes |
 |---|---|---|
-| SoC | `Rockchip` (large BGA, board says RK3588S2) | 8-core: 4× Cortex-A76 + 4× Cortex-A55; Mali-G610 MP4; ~6 TOPS NPU |
-| RAM | Micron LPDDR — two packages flanking the SoC (FBGA `4CB77 / D8C…`) | **8 GB** per sticker SKU |
-| Storage | FORESEE flash (`F1G0BU…`) | **128 GB** eMMC (≈119 GiB usable — matches the `~119 GB eMMC` in PSG1_NOTES) |
-| PMIC | smaller `Rockchip`-marked chip, lower-center | Almost certainly an RK806 companion PMIC for the RK3588. **Exact P/N unconfirmed** (glare). `1R5` / `2R2` nearby are buck-converter power-inductor values |
-| Wi-Fi / BT | green module w/ onboard antenna + QR, top-right | Combo radio. **Exact model + Wi-Fi 5/6 generation unconfirmed** (silkscreen obscured) |
+| SoC | `Rockchip RK3588S2` (die-confirmed, large BGA) | 8-core: 4× Cortex-A76 + 4× Cortex-A55; Mali-G610 MP4; ~6 TOPS NPU |
+| RAM | Micron LPDDR — two packages flanking the SoC (FBGA `4CB77 / D8CTX`) | **8 GB** per sticker SKU |
+| Storage | FORESEE flash | **128 GB** eMMC (≈119 GiB usable — matches the `~119 GB eMMC` in PSG1_NOTES) |
+| PMIC | `Rockchip **RK806-1**` (`2535` lot), lower-center | Companion PMIC for the RK3588 family. `1R5` / `2R2` nearby are buck-converter power-inductor values |
+| Wi-Fi / BT | `Fn-Link **N280A-SRL**` module w/ onboard antenna + QR | **Wi-Fi 6** (802.11ax), 1×1, dual-band + **Bluetooth 5.4**. WLAN over SDIO 3.0, BT over UART. Silicon is likely AIC8800-family (the Fn-Link N200-series Wi-Fi 6 modules are AIC8800-based) — exact chip not die-verified |
 
 ### RK3588S2 capability summary
 
@@ -110,20 +113,24 @@ envelope is:
 
 ---
 
-## Open items (need clearer macro shots to confirm)
+## Open items — RESOLVED
 
-1. **PMIC exact part number** — the smaller Rockchip-marked chip lower-center (suspected RK806).
-2. **Wi-Fi/BT module model** — to pin down Wi-Fi 5 vs Wi-Fi 6 and TX power.
+Both formerly-open parts were confirmed from unfiltered, side-lit macro shots:
 
-The rest of the project docs were checked for these and don't record them: the
-only Wi-Fi-related fact anywhere is the **`CN` country code** (`PSG1_NOTES.md`),
-which doesn't identify the chip, and the PMIC isn't mentioned at all. So a
-straight-on, well-lit close-up of each chip is still the way to resolve both —
-the firmware/software side doesn't expose them.
+1. **PMIC** → `Rockchip RK806-1` (die-read). ✅
+2. **Wi-Fi/BT module** → `Fn-Link N280A-SRL`: Wi-Fi 6 (802.11ax) 1×1 dual-band +
+   BT 5.4, SDIO 3.0 WLAN / UART BT. ✅ (Module P/N read off the can; the
+   underlying Wi-Fi silicon is likely AIC8800-family but not individually
+   die-verified.)
+
+The only remaining nuance is the exact Micron LPDDR generation — the FBGA code
+`D8CTX` identifies the package but not the LPDDR4/4X/5 grade with certainty.
+Not worth chasing; the RK3588S2 + 8 GB figure is what matters.
 
 ---
 
 *Cross-references: SoC/GPU/storage figures here are consistent with the
 software-probed values in [PSG1_NOTES.md](PSG1_NOTES.md) → "Hardware". This doc
 adds the RAM size (8 GB), storage SKU (128 GB), board revision (V2.0), board ID,
+the PMIC (RK806-1), the Wi-Fi/BT module (Fn-Link N280A-SRL, Wi-Fi 6 + BT 5.4),
 and the physical connector layout, none of which are visible from software.*
