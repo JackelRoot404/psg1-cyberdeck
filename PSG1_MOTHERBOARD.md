@@ -72,13 +72,21 @@ all practical purposes.
 |---|---|---|
 | Bottom edge | Row of FPC/ribbon connectors (varying widths) | Display, touch digitizer, control board (D-pad / buttons / sticks). On a handheld this edge is the whole front-panel interface. |
 | Bottom-left | White JST-style connector | Battery (most likely) or a speaker/peripheral pigtail |
-| Right edge (front) | microSD slot + a board-to-board / FPC | microSD; the B2B/FPC likely routes USB-C (charge/OTG) and any video-out via a port daughterboard |
+| Right edge (front) | microSD slot + a board-to-board / FPC | microSD; the B2B/FPC routes the USB-C port (charge/OTG + DP-alt video — confirmed in software, see below) via a port daughterboard |
 | Left edge (back) | Second microSD slot | Dual-SD: OS on one card, library on the other |
 | Top-right | Wi-Fi/BT module | Onboard antenna; a U.FL to a shell antenna may also be present |
 
+**USB-C (confirmed from software — `PSG1_CYBERDECK_OPS.md`):** the Type-C port is
+**USB 1.2 + USB-PD 3.0, dual-role data and dual-role power**, and the kernel
+exposes **`card0-DP-1`** — so **DisplayPort alt-mode is supported**: a USB-C hub
+with DP-alt drives an external monitor, and a PD-passthrough hub charges the
+device while in host mode. This is the single external display head the S2
+provides.
+
 **S2 I/O caveat:** because this is the **S2** variant, don't expect SATA,
 multiple full PCIe lanes, or dual independent display heads — those are trimmed
-vs. the full RK3588. Fine for a handheld; it's not an SBC/NAS-class chip.
+vs. the full RK3588. The one DP-alt output above is the display head you get.
+Fine for a handheld; it's not an SBC/NAS-class chip.
 
 ---
 
@@ -107,7 +115,11 @@ envelope is:
 1. **PMIC exact part number** — the smaller Rockchip-marked chip lower-center (suspected RK806).
 2. **Wi-Fi/BT module model** — to pin down Wi-Fi 5 vs Wi-Fi 6 and TX power.
 
-A straight-on, well-lit close-up of each would resolve both.
+The rest of the project docs were checked for these and don't record them: the
+only Wi-Fi-related fact anywhere is the **`CN` country code** (`PSG1_NOTES.md`),
+which doesn't identify the chip, and the PMIC isn't mentioned at all. So a
+straight-on, well-lit close-up of each chip is still the way to resolve both —
+the firmware/software side doesn't expose them.
 
 ---
 
