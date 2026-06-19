@@ -29,9 +29,9 @@ RK3326/RK3566 class used in budget retro devices.
 |---|---|---|
 | Board ID | `PS01-2547-002-A2` | Front silkscreen, top-right |
 | Module marking | `PSG1 RK3588S2 V2.0N 2025.10.27` | Front silkscreen, center-right |
-| Sticker | `PSG1 RK3588S2 V2.0 8+128G  2026-11-25  FS01219` | Back of board |
+| Sticker | `PSG1 RK3588S2 V2.0 8+128G  2025-11-25  FS01219` | Back of board |
 | Hardware rev | **V2.0** | — |
-| Build / date code | `2026-11-25` | Back sticker |
+| Build / date code | `2025-11-25` | Back sticker (consistent with module silkscreen `2025.10.27`) |
 | Unit serial / batch | `FS01219` | Back sticker |
 
 ### A note on "RK3588S" vs "RK3588S2"
@@ -52,7 +52,7 @@ all practical purposes.
 | Part | Marking / ID | Notes |
 |---|---|---|
 | SoC | `Rockchip` (large BGA, board says RK3588S2) | 8-core: 4× Cortex-A76 + 4× Cortex-A55; Mali-G610 MP4; ~6 TOPS NPU |
-| RAM | Micron LPDDR (`4CB77 / D8CIX`), next to SoC | **8 GB** per sticker SKU |
+| RAM | Micron LPDDR — two packages flanking the SoC (FBGA `4CB77 / D8C…`) | **8 GB** per sticker SKU |
 | Storage | FORESEE flash (`F1G0BU…`) | **128 GB** eMMC (≈119 GiB usable — matches the `~119 GB eMMC` in PSG1_NOTES) |
 | PMIC | smaller `Rockchip`-marked chip, lower-center | Almost certainly an RK806 companion PMIC for the RK3588. **Exact P/N unconfirmed** (glare). `1R5` / `2R2` nearby are buck-converter power-inductor values |
 | Wi-Fi / BT | green module w/ onboard antenna + QR, top-right | Combo radio. **Exact model + Wi-Fi 5/6 generation unconfirmed** (silkscreen obscured) |
