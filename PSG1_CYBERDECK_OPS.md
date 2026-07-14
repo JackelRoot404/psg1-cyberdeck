@@ -130,6 +130,35 @@ If you ever want the CLI: cargo-build from source inside the Ubuntu chroot is th
 - Runs as root inside; full apt available
 - Use for: anything that needs glibc, cargo-builds of x86-only crates, Anza source builds, etc.
 
+## Running your own Linux (VM, own kernel)
+
+The PSG1 can't boot a custom OS on bare metal — the OTP-fused secure boot rejects
+any non-PlaySolana-signed loader from *any* source, SD card included (see
+`PSG1_NOTES.md` → "secure boot"). What works instead: run a real Linux **guest
+with its own kernel** in QEMU on top of Android, no root and no unlock. The
+guest disk image lives on an SD card, so the card genuinely holds the OS — it's
+just booted by the hypervisor inside Android rather than at power-on.
+
+Helper: **`psg1_linux_vm.sh`** (run it in Termux on a working PSG1):
+
+```sh
+./psg1_linux_vm.sh probe            # report SD mount + KVM status
+./psg1_linux_vm.sh setup            # install qemu, fetch image, make disk on SD
+./psg1_linux_vm.sh run              # boot (Alpine installer on first run)
+./psg1_linux_vm.sh run --no-cd      # boot from disk after install
+./psg1_linux_vm.sh ssh              # ssh into the guest
+```
+
+- Defaults to **Alpine** (tiny, boots fast even emulated). `DISTRO=debian` for a
+  cloud-image Debian instead. Override `SD=`, `VM_MEM=`, `VM_CPUS=`, `DISK_GB=`.
+- **Speed hinges on `/dev/kvm`.** The script auto-selects `-accel kvm:tcg`:
+  - `/dev/kvm` usable → hardware-accelerated, near-native (desktop-capable).
+  - no KVM → TCG emulation: fine for a CLI/server Linux, sluggish for a GUI.
+- **If you want a fast Linux *desktop* and there's no KVM,** use the proot-distro
+  Ubuntu above with XFCE over VNC instead — it shares Android's kernel (so not
+  "your own kernel") but has no emulation overhead.
+- The `~119 GB eMMC` is tight; keep VM disks on the SD (the script does this).
+
 ## Reboot survival
 
 **WARNING:** PlaySolana firmware disables `com.termux`, `com.termux.boot`, `com.tailscale.ipn`, `moe.shizuku.privileged.api`, `app.lawnchair`, and more at every reboot. Disabled apps don't receive `BOOT_COMPLETED` → sshd won't start → device boots into "remotely unusable" state without intervention.

@@ -10,6 +10,7 @@ Documentation of the work I did to turn a PlaySolana PSG1 handheld into a person
 - **[psg1_termux_setup.sh](psg1_termux_setup.sh)** — idempotent bootstrap script that installs and configures everything on the Termux side. Edit `AUTHORIZED_PUBKEY` before running.
 - **[psg1_keepalive.sh](psg1_keepalive.sh)** — cron-friendly keepalive that re-enables packages PlaySolana firmware disables at every boot. Runs on a separate Linux machine acting as an ADB jumpbox.
 - **[psg1_install.sh](psg1_install.sh)** — sideload an APK (file or URL) from the jumpbox via the Echos-installer-spoof, bypassing the `no_install_unknown_sources` restriction. Push + install + cleanup in one command.
+- **[psg1_linux_vm.sh](psg1_linux_vm.sh)** — run a real, own-kernel Linux (Alpine/Debian) in QEMU on the PSG1, with the guest disk on an SD card. Auto-uses KVM if the kernel exposes it, falls back to emulation otherwise. The device can't boot a custom OS on bare metal (fused secure boot), so this is the way to "run your own OS" on it.
 
 ## Scope and disclaimers
 
