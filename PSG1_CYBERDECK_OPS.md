@@ -324,9 +324,39 @@ Restore (push a file to the device, then run in Termux):
 
 **Keepalive (`psg1_keepalive.sh`, jumpbox, every 5 min via cron):** re-enables the disabled packages, re-asserts `always_on_vpn_app` + `private_dns_mode`, and — once `com.termux` is back — cold-starts Termux with `am start` whenever sshd isn't listening (the fresh login sources `~/.bashrc`, whose guard restarts `sshd`; Termux:Boot can't fire since the package is disabled during the boot window). Silent on no-op. **After a reboot, sshd self-recovers within ≤5 min.**
 
+**Cron runs a copy under `~/bin`, never the git tree.** Install/refresh it with `./psg1_keepalive_install.sh`:
+
+```crontab
+PATH=/usr/local/bin:/usr/bin:/bin
+*/5 * * * * PSG1_ADB_TARGETS="192.168.2.32:5555 100.64.30.85:5555" /home/pi/bin/psg1_keepalive.sh >>/home/pi/psg1_keepalive.log 2>&1
+```
+
+The explicit `PATH=` matters — cron's default environment is too bare to find `adb`. An empty `psg1_keepalive.log` is the healthy state; it only writes when it actually repairs something.
+
+Pointing cron into the working tree would mean the live keepalive silently follows whatever branch is checked out — check out an older branch to look at something and the deck quietly loses its fixes for as long as you're there. (A symlink doesn't help: it resolves back into the tree.) The cost of a copy is that it can go stale, so the installed file is stamped with the commit it came from and drift is detectable:
+
+```sh
+./psg1_keepalive_install.sh           # install or refresh after editing the repo
+./psg1_keepalive_install.sh --check   # in sync with the repo? prints the source commit
+head -3 ~/bin/psg1_keepalive.sh       # what's actually running, and from where
+```
+
+**After changing `psg1_keepalive.sh`, re-run the installer — otherwise cron keeps running the old copy.**
+
 **Off the cable (untethered keepalive).** The keepalive reaches the deck over USB *or the network*. Enable persistent network adb on the deck once — `adb shell setprop persist.adb.tcp.port 5555` — which survives reboots (a system-level adb setting SvalGuard doesn't touch; adbd then listens on TCP:5555 at every boot, key-authorized). Then point the keepalive at it: `PSG1_ADB_TARGETS="<deck-lan-ip>:5555 <deck-tailnet-ip>:5555"`. Now it heals the deck after a reboot even undocked, as long as the jumpbox can reach it.
-- **Post-reboot recovery goes over the LAN endpoint** — Tailscale is disabled on boot, so the tailnet endpoint can't reach the deck until the LAN path re-enables it first. Give the deck a **stable LAN address (DHCP reservation)** for this to be reliable.
+- **Post-reboot recovery goes over the LAN endpoint** — Tailscale is disabled on boot, so the tailnet endpoint can't reach the deck until the LAN path re-enables it first.
 - **Security:** this opens a reboot-persistent, network-reachable adb port. It's gated by adb key auth (only authorized hosts connect; anyone else just gets an ignored prompt), but with no root we can't firewall it to only Tailscale — it listens on all interfaces. Fine on a trusted LAN/tailnet; a small surface on hostile WiFi. Revert with `setprop persist.adb.tcp.port -1` + reboot.
+
+**Finding the deck (three steps).** The keepalive locates the deck in this order, so a moved lease isn't fatal:
+1. **USB** — auto-detected whenever docked, and preferred when present.
+2. **`PSG1_ADB_TARGETS`** — the explicit endpoints above, tried first on the network.
+3. **Discovery** — if neither answers, it ping-sweeps the local /24s to populate the neighbour table, matches the deck's **WiFi MAC**, and connects to whatever IP that MAC now holds. This survives DHCP drift, a router reset, or the deck joining a new network. Disable with `PSG1_DISCOVER=0`.
+
+A DHCP reservation for the deck is therefore a *nice-to-have* rather than load-bearing — discovery covers the drift. Reserve it anyway if you want step 2 to keep hitting on the first try (deck MAC `78:be:81:2a:28:1a`, hostname `PSG1`); DHCP here is served by the router, not by pi2-zero's Pi-hole.
+
+- **Identity, not address.** An `ip:port` is an address, not an identity — a lease can move and leave *someone else's* device answering on `:5555`. Every network transport is checked against the deck's serial (`ro.serialno`) before the keepalive touches it, and disconnected with a log line if it doesn't match. Without that gate, a stale `PSG1_ADB_TARGETS` entry could have it running `pm enable` against a stranger's phone. USB transports are self-identifying (the transport name *is* the serial). Override the expected serial with `PSG1_SERIAL` if the deck is ever replaced.
+- **MAC randomisation.** Android randomises its MAC per-SSID by default, so the baked-in `PSG1_MAC` is only valid on the network it was read on. On a new SSID, read the deck's MAC there (`adb shell cat /sys/class/net/wlan0/address`) and pass it via `PSG1_MAC`.
+- Discovery only sweeps `/24`s, so the tailnet (a `/32`) is never swept.
 
 **Field recovery (no jumpbox reachable at all).** You're holding the deck, so: Settings → Apps → enable **Termux** and **Tailscale** → open Termux, run `termux-wake-lock; sshd` → open Tailscale, Connect. A minute of taps and it's back. Dead battery is the main *involuntary* reboot trigger, so keeping it charged avoids the whole thing.
 
@@ -336,4 +366,6 @@ Restore (push a file to the device, then run in Termux):
 - NetGuard firewalling — gave up the VPN slot to Tailscale instead
 - External monitor: only verified the kernel claims DP-alt support; no hub plugged in yet to confirm hand-off
 - Native solana-cli — see Solana section above; JS SDK is the supported path
-- Neutralising the boot-time disabler — **identified** as `vendor.playsolana.svalguard-service` (native, runs below the app layer), but stopping it needs root; worked around with the keepalive (now reachable over network adb, not just USB)
+- Neutralising the boot-time disabler — **identified** as `vendor.playsolana.svalguard-service` (native, runs below the app layer), but stopping it needs root; worked around with the keepalive (reachable over network adb, and self-locating by MAC — not just USB)
+- **A full post-reboot recovery cycle has never actually been exercised.** Every piece is verified in isolation (cron fires, keepalive repairs a real disable, network adb reachable, discovery finds the deck by MAC), but the end-to-end "reboot the deck undocked and watch it heal itself within 5 min" run has not been done — rebooting is discouraged, so this remains reasoned-through rather than observed
+- DHCP reservation for the deck — not set (router at `192.168.2.1` serves DHCP; needs the operator's admin login). Discovery makes this non-critical
