@@ -115,12 +115,19 @@ ssh -p 8022 <termux-user>@<PSG1_TS_IP>     # via Tailscale, from anywhere
 ## Solana on PSG1
 
 - **No native CLI.** Anza publishes only aarch64-apple-darwin and x86_64-linux-gnu binaries — no aarch64-unknown-linux-gnu. So `agave-install-init` 404s on both Termux native and inside the Ubuntu chroot.
-- **JS SDK path instead.** A `solana-tools/` project with `@solana/kit@2.1` + `@solana-program/system` + `@solana/spl-token` + `bs58`. Wallet helper:
+- **JS SDK path instead.** The `solana-tools/` project in this repo — `wallet.mjs`
+  on `@solana/kit` (v2). Runs in the Debian proot (or Termux); `npm install` then:
   ```sh
-  node wallet.mjs new                            # create keypair, save to ./id.json
+  node wallet.mjs new                            # create keypair, save to ./id.json (0600)
   node wallet.mjs show                           # show pubkey + balance
+  node wallet.mjs address                        # print this wallet's address only
   node wallet.mjs balance <pubkey>               # balance for any address
   ```
+  `SOLANA_RPC=` overrides the RPC (default mainnet-beta); `SOLANA_KEY=` the keyfile.
+  Add `@solana-program/system` + `@solana/spl-token` + `bs58` when you move past
+  keypairs/balances into building transactions. `@solana/kit`'s own
+  `generateKeyPairSigner` makes non-extractable keys, so `new` mints an extractable
+  Ed25519 key via WebCrypto to produce a savable 64-byte `id.json`.
 - RPC defaults to `https://api.mainnet-beta.solana.com`; override with `SOLANA_RPC=...`
 - Keyfile defaults to `./id.json`; override with `SOLANA_KEY=...`
 
