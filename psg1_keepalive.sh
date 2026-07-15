@@ -4,19 +4,27 @@
 # This re-enables them and brings sshd + always-on VPN back. Idempotent; safe to
 # run every few minutes.
 #
-# Reaches the deck over USB *and/or* the network. With persistent network adb
-# enabled on the deck (persist.adb.tcp.port=5555 — see PSG1_CYBERDECK_OPS.md),
-# set PSG1_ADB_TARGETS to the deck's "ip:port" endpoints and this can heal it
-# after a reboot even undocked, as long as the jumpbox can reach it:
+# Reaches the deck over USB *and/or* the network, finding it in three steps:
+#
+#   1. USB — auto-detected whenever the deck is docked.
+#   2. PSG1_ADB_TARGETS — explicit "ip:port" endpoints, tried first on the network.
+#   3. Discovery — if neither answers, sweep the local /24s for the deck's WiFi MAC
+#      and connect to it. Survives DHCP drift, a router reset, or the deck moving
+#      to a new network. Set PSG1_DISCOVER=0 to switch it off.
 #
 #   crontab -e:
 #   */5 * * * * PSG1_ADB_TARGETS="192.168.x.y:5555 100.64.x.y:5555" \
 #               /path/psg1_keepalive.sh >>/path/psg1_keepalive.log 2>&1
 #
-# Post-reboot recovery works over the LAN endpoint (Tailscale is disabled on boot,
-# so the tailnet endpoint can't reach the deck until the LAN path re-enables it
-# first) — so give the deck a STABLE LAN address (a DHCP reservation). With no
-# network targets set it behaves as before: USB-only.
+# Network adb needs persist.adb.tcp.port=5555 set once on the deck (survives
+# reboots — see PSG1_CYBERDECK_OPS.md). Post-reboot recovery works over the LAN
+# path; the tailnet endpoint can't reach the deck until Tailscale is re-enabled,
+# so it's a fallback, not the recovery path.
+#
+# IDENTITY: an ip:port is an address, not an identity — a lease can move and leave
+# some other device answering on :5555. Every network transport is checked against
+# the deck's serial before we touch it, and disconnected if it doesn't match. USB
+# transports are self-identifying (the transport name *is* the serial).
 
 set -u
 
@@ -31,19 +39,82 @@ PACKAGES=(
   app.lawnchair
 )
 
-# (Re)connect any configured network endpoints; USB is auto-detected regardless.
+EXPECT_SERIAL="${PSG1_SERIAL:-PS01-2549-001-A2-002791}"
+# Per-SSID MAC: Android randomises by default, so this is only valid for the
+# network it was read on. On a new SSID, read the deck's MAC there and pass it in.
+EXPECT_MAC="${PSG1_MAC:-78:be:81:2a:28:1a}"
+ADB_PORT="${PSG1_ADB_PORT:-5555}"
+DISCOVER="${PSG1_DISCOVER:-1}"
+
+ts="$(date '+%Y-%m-%d %H:%M:%S')"
+
+# Is this transport actually our deck?
+is_deck() {
+  [ "$(adb -s "$1" shell getprop ro.serialno 2>/dev/null | tr -d '\r\n')" = "$EXPECT_SERIAL" ]
+}
+
+# First live transport that really is the deck; USB sorts first via adb's ordering.
+live_deck() {
+  local t
+  for t in $(adb devices | awk '$2=="device"{print $1}'); do
+    is_deck "$t" && { printf '%s\n' "$t"; return 0; }
+  done
+  return 1
+}
+
+# Drop any network transport that answers adb but isn't the deck — a stale
+# PSG1_ADB_TARGETS entry pointing at a reassigned lease is the likely cause, and
+# is worth saying out loud rather than silently ignoring.
+vet_transports() {
+  local t
+  for t in $(adb devices | awk '$2=="device" && $1 ~ /:/ {print $1}'); do
+    if ! is_deck "$t"; then
+      echo "[$ts] $t answers adb but is not the deck (serial mismatch) — disconnecting"
+      adb disconnect "$t" >/dev/null 2>&1
+    fi
+  done
+}
+
+# Find the deck by MAC on the local /24s. Ping-sweeps to populate the neighbour
+# table, then matches the MAC — so we only ever adb-connect to a host we've already
+# identified, rather than probing :5555 across the subnet.
+discover() {
+  local addr base i ip
+  for addr in $(ip -4 -o addr show scope global 2>/dev/null | awk '{split($4,a,"/"); if (a[2]==24) print a[1]}'); do
+    base="${addr%.*}"
+    for i in $(seq 1 254); do ping -c1 -W1 "$base.$i" >/dev/null 2>&1 & done
+    wait
+    ip="$(ip neigh show 2>/dev/null | awk -v m="$EXPECT_MAC" 'tolower($5)==tolower(m){print $1; exit}')"
+    [ -n "$ip" ] || continue
+    adb connect "$ip:$ADB_PORT" >/dev/null 2>&1
+    if is_deck "$ip:$ADB_PORT"; then
+      # Log to stderr: stdout is this function's return value. cron's 2>&1 still
+      # lands it in the log.
+      echo "[$ts] found the deck at $ip:$ADB_PORT by MAC ($EXPECT_MAC)" >&2
+      printf '%s\n' "$ip:$ADB_PORT"
+      return 0
+    fi
+    adb disconnect "$ip:$ADB_PORT" >/dev/null 2>&1
+  done
+  return 1
+}
+
+# (Re)connect configured endpoints; USB is auto-detected regardless.
 read -r -a NET_TARGETS <<< "${PSG1_ADB_TARGETS:-}"
 if [ "${#NET_TARGETS[@]}" -gt 0 ]; then
   for t in "${NET_TARGETS[@]}"; do adb connect "$t" >/dev/null 2>&1; done
 fi
 
-# Act on any live (authorized) transport — USB or network. None => deck not
-# reachable right now (off, or on a network we can't see): nothing to do.
-SERIAL="$(adb devices | awk '$2=="device"{print $1; exit}')"
-[ -n "$SERIAL" ] || exit 0
-ADB=(adb -s "$SERIAL")
+vet_transports
 
-ts="$(date '+%Y-%m-%d %H:%M:%S')"
+SERIAL="$(live_deck || true)"
+if [ -z "$SERIAL" ] && [ "$DISCOVER" != "0" ]; then
+  SERIAL="$(discover || true)"
+fi
+# Nothing to do: deck is off, or on a network we can't see.
+[ -n "$SERIAL" ] || exit 0
+
+ADB=(adb -s "$SERIAL")
 needed_action=0
 
 for pkg in "${PACKAGES[@]}"; do
