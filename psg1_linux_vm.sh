@@ -18,7 +18,7 @@
 #                                  when there's no KVM, prefer proot-distro
 #                                  Ubuntu + VNC instead (shares Android's kernel;
 #                                  see PSG1_CYBERDECK_OPS.md).
-#   This script auto-selects `-accel kvm:tcg`, so it runs either way.
+#   This script auto-selects `-accel kvm` when usable, else `-accel tcg`.
 #
 # Run this IN TERMUX on a working PSG1 (not via the jumpbox — the VM runs on the
 # device). NOTE: authored off-device; on first run verify the SD mount and the
@@ -164,8 +164,10 @@ EOF
 run_vm() {
   local mode="${1:-}"
   local uefi; uefi="$(find_uefi)" || die "aarch64 UEFI firmware not found under \$PREFIX/share/qemu"
-  local accel="kvm:tcg" cpu="max"
-  [ "$(kvm_status)" = "usable" ] && { accel="kvm:tcg"; cpu="host"; }
+  # NB: -accel takes a single accelerator; the "kvm:tcg" colon-fallback is only
+  # valid with -machine accel=, not -accel. Pick one explicitly.
+  local accel="tcg" cpu="max"
+  [ "$(kvm_status)" = "usable" ] && { accel="kvm"; cpu="host"; }
 
   local -a args=(
     -accel "$accel" -M virt -cpu "$cpu" -smp "$VM_CPUS" -m "$VM_MEM"

@@ -187,6 +187,15 @@ Helper: **`psg1_linux_vm.sh`** (run it in Termux on a working PSG1):
   an NVRAM entry. On-device it boots straight to a shell in **~175 s** (TCG):
   `SD=/storage/XXXX-XXXX ./psg1_linux_vm.sh run`. `run --install` re-attaches the
   ISO for a fresh build.
+- **SSH into it:** the image has `openssh` enabled at boot with `eth0` on DHCP, so
+  once it's up, `SD=/storage/XXXX-XXXX ./psg1_linux_vm.sh ssh` (i.e. `ssh -p 2222
+  root@localhost` from Termux — the guest's :22 is host-forwarded to the device's
+  localhost:2222) lands a root shell. Key auth for the jumpbox + Termux keys,
+  `root/root` as a password fallback. Reachable ~100–175 s after `run`.
+- **`-accel` fix:** the script shipped with `-accel kvm:tcg`, which QEMU rejects
+  (`invalid accelerator`) — the `kvm:tcg` colon-fallback is only valid with
+  `-machine accel=`. It now selects `-accel kvm` (if `/dev/kvm` is usable) or
+  `-accel tcg`. Before this, `run` never actually started on the PSG1.
 - **`SD=` must be set explicitly.** The script's `detect_sd` globs `/storage/*`,
   but Android scoped storage won't let the app *list* `/storage` even with
   all-files access (direct paths like `/storage/F230-402C` work fine). So run e.g.
