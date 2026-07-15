@@ -45,21 +45,31 @@ EXPECT_SERIAL="${PSG1_SERIAL:-PS01-2549-001-A2-002791}"
 EXPECT_MAC="${PSG1_MAC:-78:be:81:2a:28:1a}"
 ADB_PORT="${PSG1_ADB_PORT:-5555}"
 DISCOVER="${PSG1_DISCOVER:-1}"
+CONNECT_TIMEOUT="${PSG1_CONNECT_TIMEOUT:-5}"
 
 ts="$(date '+%Y-%m-%d %H:%M:%S')"
 
-# Is this transport actually our deck?
+# Start the server explicitly: otherwise the first adb call emits "daemon not
+# running; starting now" on stderr and cron's 2>&1 dumps it into the log.
+adb start-server >/dev/null 2>&1
+
+# Is this transport actually our deck? Bounded — a half-dead transport can stall.
 is_deck() {
-  [ "$(adb -s "$1" shell getprop ro.serialno 2>/dev/null | tr -d '\r\n')" = "$EXPECT_SERIAL" ]
+  [ "$(timeout 10 adb -s "$1" shell getprop ro.serialno 2>/dev/null | tr -d '\r\n')" = "$EXPECT_SERIAL" ]
 }
 
 # First live transport that really is the deck; USB sorts first via adb's ordering.
 live_deck() {
   local t
-  for t in $(adb devices | awk '$2=="device"{print $1}'); do
+  for t in $(adb devices 2>/dev/null | awk '$2=="device"{print $1}'); do
     is_deck "$t" && { printf '%s\n' "$t"; return 0; }
   done
   return 1
+}
+
+# Any transport stuck in adb's "offline" state?
+has_offline() {
+  adb devices 2>/dev/null | awk '$2=="offline"{f=1} END{exit !f}'
 }
 
 # Drop any network transport that answers adb but isn't the deck — a stale
@@ -67,7 +77,7 @@ live_deck() {
 # is worth saying out loud rather than silently ignoring.
 vet_transports() {
   local t
-  for t in $(adb devices | awk '$2=="device" && $1 ~ /:/ {print $1}'); do
+  for t in $(adb devices 2>/dev/null | awk '$2=="device" && $1 ~ /:/ {print $1}'); do
     if ! is_deck "$t"; then
       echo "[$ts] $t answers adb but is not the deck (serial mismatch) — disconnecting"
       adb disconnect "$t" >/dev/null 2>&1
@@ -86,7 +96,7 @@ discover() {
     wait
     ip="$(ip neigh show 2>/dev/null | awk -v m="$EXPECT_MAC" 'tolower($5)==tolower(m){print $1; exit}')"
     [ -n "$ip" ] || continue
-    adb connect "$ip:$ADB_PORT" >/dev/null 2>&1
+    timeout "$CONNECT_TIMEOUT" adb connect "$ip:$ADB_PORT" >/dev/null 2>&1 || true
     if is_deck "$ip:$ADB_PORT"; then
       # Log to stderr: stdout is this function's return value. cron's 2>&1 still
       # lands it in the log.
@@ -101,13 +111,39 @@ discover() {
 
 # (Re)connect configured endpoints; USB is auto-detected regardless.
 read -r -a NET_TARGETS <<< "${PSG1_ADB_TARGETS:-}"
-if [ "${#NET_TARGETS[@]}" -gt 0 ]; then
-  for t in "${NET_TARGETS[@]}"; do adb connect "$t" >/dev/null 2>&1; done
-fi
+connect_targets() {
+  local t
+  [ "${#NET_TARGETS[@]}" -gt 0 ] || return 0
+  # Bound it. An endpoint that black-holes rather than refusing makes a bare
+  # `adb connect` hang on TCP SYN retries for >2 min — and the tailnet endpoint
+  # black-holes in exactly the situation this script exists for, since Tailscale
+  # is down after a reboot. Unbounded, every tick burned minutes and cron piled
+  # the ticks up (observed 2026-07-15).
+  for t in "${NET_TARGETS[@]}"; do timeout "$CONNECT_TIMEOUT" adb connect "$t" >/dev/null 2>&1 || true; done
+}
 
+connect_targets
 vet_transports
 
 SERIAL="$(live_deck || true)"
+
+# When the deck reboots, its old TCP transport sticks at "offline" permanently:
+# `adb connect` answers "already connected", disconnect+connect answers the same,
+# and `adb reconnect offline` says "reconnecting" and changes nothing. Only a
+# server restart clears it. The keepalive's own connects during the boot window
+# are what create these, so every real reboot poisoned the server and the network
+# path could never recover — measured in the 2026-07-15 reboot test, not theory.
+#
+# Only fires when nothing live was found, so a working USB session is never cut.
+if [ -z "$SERIAL" ] && has_offline; then
+  echo "[$ts] stale offline transport(s) — restarting adb server to clear them"
+  adb kill-server >/dev/null 2>&1
+  adb start-server >/dev/null 2>&1
+  connect_targets
+  vet_transports
+  SERIAL="$(live_deck || true)"
+fi
+
 if [ -z "$SERIAL" ] && [ "$DISCOVER" != "0" ]; then
   SERIAL="$(discover || true)"
 fi
