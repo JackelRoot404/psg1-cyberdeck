@@ -50,6 +50,14 @@ adb -s "$SERIAL" forward "tcp:$SSH_FWD" tcp:8022 >/dev/null
 SSH=(ssh -p "$SSH_FWD" -o BatchMode=yes -o ConnectTimeout=10
      -o StrictHostKeyChecking=accept-new "$TUSER@localhost")
 
+# --- detect a mounted SD card to bind into the guest at /mnt/card ------------
+# Android mounts removable cards at /storage/XXXX-XXXX (a volume UUID). Requires
+# Termux "all files access" (appops MANAGE_EXTERNAL_STORAGE) + a Termux restart,
+# else /storage is unreadable to the app. See PSG1_CYBERDECK_OPS.md.
+CARD="${CARD:-$("${SSH[@]}" 'for d in /storage/*-*; do [ -w "$d" ] && { echo "$d"; break; }; done' 2>/dev/null | tr -d "\r")}"
+BIND=""
+if [ -n "$CARD" ]; then BIND="--bind $CARD:/mnt/card"; echo "card: $CARD -> /mnt/card"; else echo "no SD card detected (skipping /mnt/card bind)"; fi
+
 # --- start the desktop if it isn't already running ---------------------------
 if "${SSH[@]}" 'tmux has-session -t vnc 2>/dev/null'; then
   echo "desktop already running (tmux session 'vnc')"
@@ -63,7 +71,7 @@ else
 #!/bin/bash
 set -e
 export USER=root HOME=/root
-mkdir -p /root/.config/tigervnc
+mkdir -p /mnt/card /root/.config/tigervnc
 cat > /root/.config/tigervnc/xstartup <<'XS'
 #!/bin/bash
 unset SESSION_MANAGER DBUS_SESSION_BUS_ADDRESS
@@ -92,7 +100,7 @@ GS
   B64=$(printf '%s' "$GUEST" | base64 -w0)
   "${SSH[@]}" "echo $B64 | base64 -d | proot-distro login $DISTRO -- bash -s"
   "${SSH[@]}" "termux-wake-lock 2>/dev/null || true; \
-               tmux new-session -d -s vnc 'proot-distro login $DISTRO -- bash /root/startvnc.sh'"
+               tmux new-session -d -s vnc 'proot-distro login $DISTRO $BIND -- bash /root/startvnc.sh'"
   sleep 8
   echo "desktop started"
 fi

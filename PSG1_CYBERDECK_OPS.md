@@ -164,10 +164,15 @@ Helper: **`psg1_linux_vm.sh`** (run it in Termux on a working PSG1):
   unreachable (OTP secure boot), so the kernel can't be rebuilt to add KVM.
   → For anything interactive use the **GUI desktop over VNC** (below); keep QEMU
   for when you specifically need a *separate* kernel.
-- **The card must be exFAT, not FAT32.** An 8 GB / growing qcow2 blows past
-  FAT32's 4 GB per-file cap. Reformat on the jumpbox: `sudo mkfs.exfat -L PSG1SD
-  /dev/sdX1` (Android mounts exFAT natively). Stage the Alpine ISO + `alpine.qcow2`
-  + `psg1_linux_vm.sh` onto it there, then move the card to the PSG1.
+- **The card must be FAT32 — this kernel has no exFAT.** `CONFIG_EXFAT_FS` is
+  **not set** in the `6.1.115-abplaysolana` kernel (only `CONFIG_VFAT_FS`), so an
+  exFAT card enumerates but Android reports it `unmountable` (`sm list-volumes`).
+  FAT32's **4 GB per-file cap** then constrains the VM disk: create the qcow2 at
+  **≤3 GB** (`DISK_GB=3` — a CLI Alpine needs ~1–2 GB) so it can't grow past the
+  cap, or keep the disk on internal storage instead. Reformat on the jumpbox:
+  `sudo mkfs.vfat -F 32 -n PSG1SD /dev/sdX1`, then stage the Alpine ISO +
+  `alpine.qcow2` + `psg1_linux_vm.sh` and move the card to the PSG1. (Android
+  can only mount vfat/exfat for *portable* storage; with exfat out, vfat it is.)
 - The `~119 GB eMMC` is tight; keep VM disks on the SD (the script does this).
 
 ## GUI desktop over VNC
@@ -211,6 +216,26 @@ Gotchas learned the hard way:
   survive the login returning and any SSH drop.
 - **Not reboot-persistent.** The desktop lives in a Termux tmux session; after a
   reboot or Termux being killed, just re-run `psg1_desktop.sh`.
+
+### Sharing the SD card into Debian
+
+`psg1_desktop.sh` auto-detects a mounted SD card (`/storage/XXXX-XXXX`) and binds
+it into the guest at **`/mnt/card`**, so the desktop, the CLI, and the QEMU VM
+all share the 231 GB card. For a plain login: `proot-distro login debian --bind
+/storage/XXXX-XXXX:/mnt/card`.
+
+Prerequisite — Android scoped storage blocks apps from `/storage` by default, so
+the proot (running as the Termux uid) can't see the card until Termux is granted
+broad storage access **and restarted**:
+- Grant all-files access: `adb shell appops set com.termux MANAGE_EXTERNAL_STORAGE
+  allow` (or Settings → Apps → Termux → Permissions → Files → all files). The SD
+  *root* needs all-files access; `READ_EXTERNAL_STORAGE` alone only reaches
+  `/storage/emulated/0`.
+- **Then fully restart Termux** — swipe it from recents, reopen, `sshd`. The
+  per-app storage mount is set at process-fork time, so a running Termux won't
+  see the card until the whole app process restarts; `pkill sshd; sshd` is not
+  enough (that child inherits the old mount namespace). Persists across reboots
+  once granted.
 
 ## Reboot survival
 
