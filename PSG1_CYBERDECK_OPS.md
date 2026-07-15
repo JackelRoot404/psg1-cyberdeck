@@ -18,6 +18,8 @@ How my PSG1 is configured day-to-day after the cyberdeck conversion. Companion t
 - Authorized keys: the SSH pubkeys for the jumpbox + my laptop
 - **From the jumpbox:** `ssh -p 8022 u0_a<N>@<PSG1_LAN_IP>`
 - **From anywhere via Tailscale:** `ssh -p 8022 u0_a<N>@<PSG1_TS_IP>`
+- **Over adb, no LAN/tailnet needed:** `adb forward tcp:18022 tcp:8022` then `ssh -p 18022 u0_a<N>@localhost`. The jumpbox key must live in **Termux's** `~/.ssh/authorized_keys` (`/data/data/com.termux/files/home/.ssh/`), *not* a proot guest's home — an easy mix-up if you add the key from inside `proot-distro login`.
+- **After `pkg upgrade`, restart sshd.** Upgrading openssh swaps the binary under the running daemon; the old sshd keeps listening but new connections die at `kex_exchange_identification: Connection closed` (socket accepted, no banner sent). Fix: `pkill sshd; sshd`.
 - Auto-starts on **device reboot** via `~/.termux/boot/10-sshd` (needs Termux:Boot). After just-restarting the Termux app, run `sshd` manually.
 - Wake lock via `~/.termux/boot/00-wakelock` so sshd survives doze
 
@@ -154,10 +156,61 @@ Helper: **`psg1_linux_vm.sh`** (run it in Termux on a working PSG1):
 - **Speed hinges on `/dev/kvm`.** The script auto-selects `-accel kvm:tcg`:
   - `/dev/kvm` usable → hardware-accelerated, near-native (desktop-capable).
   - no KVM → TCG emulation: fine for a CLI/server Linux, sluggish for a GUI.
-- **If you want a fast Linux *desktop* and there's no KVM,** use the proot-distro
-  Ubuntu above with XFCE over VNC instead — it shares Android's kernel (so not
-  "your own kernel") but has no emulation overhead.
+- **Confirmed on this unit (2026-07):** `/dev/kvm` is **absent** and `CONFIG_KVM`
+  is **not built** into the `6.1.115-abplaysolana` kernel (only `CONFIG_HAVE_KVM`,
+  the arch capability). So QEMU here is **TCG-only** — no acceleration, even for
+  same-arch aarch64-on-aarch64 (TCG has no same-arch fast path; that speed comes
+  from KVM). Boots a CLI Alpine fine, far too slow for a desktop. Root is
+  unreachable (OTP secure boot), so the kernel can't be rebuilt to add KVM.
+  → For anything interactive use the **GUI desktop over VNC** (below); keep QEMU
+  for when you specifically need a *separate* kernel.
+- **The card must be exFAT, not FAT32.** An 8 GB / growing qcow2 blows past
+  FAT32's 4 GB per-file cap. Reformat on the jumpbox: `sudo mkfs.exfat -L PSG1SD
+  /dev/sdX1` (Android mounts exFAT natively). Stage the Alpine ISO + `alpine.qcow2`
+  + `psg1_linux_vm.sh` onto it there, then move the card to the PSG1.
 - The `~119 GB eMMC` is tight; keep VM disks on the SD (the script does this).
+
+## GUI desktop over VNC
+
+A full Linux **desktop on the deck**, viewed from the jumpbox. It runs in a
+proot-distro guest (Debian 13 here), so it **shares Android's kernel** — no VM,
+no emulation, native A76 speed. Given there's no KVM (above), this is the only
+way to get a *usable* GUI; QEMU's emulated framebuffer is unusably slow.
+
+Stack: XFCE + TigerVNC inside the guest, bound to loopback, tunnelled to the
+jumpbox over adb, viewed with any VNC client.
+
+One-time setup, inside the guest (`proot-distro login debian`):
+```sh
+apt update && apt install -y --no-install-recommends \
+  xfce4 xfce4-terminal xfce4-settings dbus-x11 dbus \
+  tigervnc-standalone-server tigervnc-common fonts-dejavu-core x11-xserver-utils
+```
+
+Then, from the jumpbox, one command brings it up and opens a viewer:
+```sh
+./psg1_desktop.sh                 # ensure server up, tunnel :5901, launch viewer
+GEOM=1920x1080 ./psg1_desktop.sh  # pick a resolution
+```
+The helper idempotently writes the guest's `~/.config/tigervnc/xstartup`, starts
+`tigervncserver :1` inside a **tmux** session, `adb forward`s 5901 to the jumpbox,
+and launches `xtigervncviewer`. To connect by hand once it's up:
+`xtigervncviewer -SecurityTypes None localhost:5901`.
+
+Gotchas learned the hard way:
+- **TigerVNC ≥1.13 (Debian 13) moved config to `~/.config/tigervnc/`.** If a
+  legacy `~/.vnc/` exists but `~/.config/tigervnc/` doesn't, *every*
+  `tigervncserver` call — even `--version` — aborts with "Could not migrate …".
+  Fix: create `~/.config/tigervnc/`, put `xstartup` there, delete `~/.vnc/`.
+- **No password is fine** because the server binds `-localhost yes` (loopback
+  only) and is reachable solely through the adb/ssh tunnel — never exposed on
+  wlan0 or the tailnet.
+- **tmux keeps it alive.** `tigervncserver` daemonises Xvnc as a child of the
+  proot login; when that login returns, proot reaps it. The start script ends
+  with `exec sleep infinity` inside a tmux session so the proot — and Xvnc —
+  survive the login returning and any SSH drop.
+- **Not reboot-persistent.** The desktop lives in a Termux tmux session; after a
+  reboot or Termux being killed, just re-run `psg1_desktop.sh`.
 
 ## Reboot survival
 
