@@ -292,6 +292,32 @@ broad storage access **and restarted**:
   enough (that child inherits the old mount namespace). Persists across reboots
   once granted.
 
+## Backing up the deck
+
+The scripts and docs here are in git, but the **hand-built device state is not**:
+the proot Debian desktop, the Kali container, Termux's keys/config, and the VM
+image all live on the PSG1's eMMC/SD and would be lost on a wipe or eMMC failure.
+**`psg1_backup.sh`** (jumpbox) snapshots all of it:
+
+```sh
+./psg1_backup.sh                 # -> ~/psg1-backups/psg1-backup-<ts>/
+DEST=/mnt/somewhere ./psg1_backup.sh
+```
+
+It pulls every proot-distro container (via `proot-distro backup`), the Termux
+home (SSH keys, `.termux/`, `~/vm`), the SD-card VM image, and the package list,
+and drops a `README-restore.md`. Compression happens on-device, so large
+containers are slow — a multi-GB Kali can take 20-30 min.
+
+**Keep the output local — it contains SSH private keys.** Do not commit it or push
+it to the `pi-config-backups` repo (that one is redacted configs only).
+
+Restore (push a file to the device, then run in Termux):
+- container: `proot-distro restore proot-<name>.tar.gz` (destroys the existing one)
+- home:      `tar xzf termux-home.tar.gz -C ~`
+- VM image:  copy `alpine-vm.qcow2` onto the card as `alpine.qcow2`
+- packages:  `xargs pkg install -y < termux-packages.txt` (or re-run `psg1_termux_setup.sh`)
+
 ## Reboot survival
 
 **WARNING:** PlaySolana firmware disables `com.termux`, `com.termux.boot`, `com.tailscale.ipn`, `moe.shizuku.privileged.api`, `app.lawnchair`, and more at every reboot. Disabled apps don't receive `BOOT_COMPLETED` → sshd won't start → device boots into "remotely unusable" state without intervention.
