@@ -1,0 +1,10 @@
+{
+  "name": "solana-tools",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Minimal Solana JS tooling for the PSG1 (no native aarch64 solana-cli exists).",
+  "dependencies": {
+    "@solana/kit": "^2.1.0"
+  }
+}

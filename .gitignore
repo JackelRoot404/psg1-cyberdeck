@@ -99,6 +99,8 @@ keypair.json
 wallet.json
 solana-tools/id.json
 solana-tools/**/*.json
+# ...but the project manifest is safe to publish (keypairs are covered above)
+!solana-tools/package.json
 
 # ============================================================
 # Local (unredacted) versions — must never be committed
