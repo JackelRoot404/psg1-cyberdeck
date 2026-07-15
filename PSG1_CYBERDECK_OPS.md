@@ -324,14 +324,24 @@ Restore (push a file to the device, then run in Termux):
 
 **Keepalive (`psg1_keepalive.sh`, jumpbox, every 5 min via cron):** re-enables the disabled packages, re-asserts `always_on_vpn_app` + `private_dns_mode`, and — once `com.termux` is back — cold-starts Termux with `am start` whenever sshd isn't listening (the fresh login sources `~/.bashrc`, whose guard restarts `sshd`; Termux:Boot can't fire since the package is disabled during the boot window). Silent on no-op. **After a reboot, sshd self-recovers within ≤5 min.**
 
-Installed in `pi`'s crontab on the jumpbox — note the explicit `PATH=`, since cron's default environment is too bare to find `adb`:
+**Cron runs a copy under `~/bin`, never the git tree.** Install/refresh it with `./psg1_keepalive_install.sh`:
 
 ```crontab
 PATH=/usr/local/bin:/usr/bin:/bin
-*/5 * * * * PSG1_ADB_TARGETS="192.168.2.32:5555 100.64.30.85:5555" "/home/pi/PSG1 CYBERDECK/psg1_keepalive.sh" >>/home/pi/psg1_keepalive.log 2>&1
+*/5 * * * * PSG1_ADB_TARGETS="192.168.2.32:5555 100.64.30.85:5555" /home/pi/bin/psg1_keepalive.sh >>/home/pi/psg1_keepalive.log 2>&1
 ```
 
-An empty `psg1_keepalive.log` is the healthy state — it only writes when it actually repairs something.
+The explicit `PATH=` matters — cron's default environment is too bare to find `adb`. An empty `psg1_keepalive.log` is the healthy state; it only writes when it actually repairs something.
+
+Pointing cron into the working tree would mean the live keepalive silently follows whatever branch is checked out — check out an older branch to look at something and the deck quietly loses its fixes for as long as you're there. (A symlink doesn't help: it resolves back into the tree.) The cost of a copy is that it can go stale, so the installed file is stamped with the commit it came from and drift is detectable:
+
+```sh
+./psg1_keepalive_install.sh           # install or refresh after editing the repo
+./psg1_keepalive_install.sh --check   # in sync with the repo? prints the source commit
+head -3 ~/bin/psg1_keepalive.sh       # what's actually running, and from where
+```
+
+**After changing `psg1_keepalive.sh`, re-run the installer — otherwise cron keeps running the old copy.**
 
 **Off the cable (untethered keepalive).** The keepalive reaches the deck over USB *or the network*. Enable persistent network adb on the deck once — `adb shell setprop persist.adb.tcp.port 5555` — which survives reboots (a system-level adb setting SvalGuard doesn't touch; adbd then listens on TCP:5555 at every boot, key-authorized). Then point the keepalive at it: `PSG1_ADB_TARGETS="<deck-lan-ip>:5555 <deck-tailnet-ip>:5555"`. Now it heals the deck after a reboot even undocked, as long as the jumpbox can reach it.
 - **Post-reboot recovery goes over the LAN endpoint** — Tailscale is disabled on boot, so the tailnet endpoint can't reach the deck until the LAN path re-enables it first.
