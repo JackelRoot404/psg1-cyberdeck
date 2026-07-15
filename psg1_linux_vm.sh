@@ -25,23 +25,28 @@
 # `ls -l /dev/kvm` result (the script prints both).
 #
 # Usage:
-#   ./psg1_linux_vm.sh setup          # install deps, fetch image, create disk
-#   ./psg1_linux_vm.sh run            # boot the VM (installer on first Alpine run)
-#   ./psg1_linux_vm.sh run --no-cd    # boot from disk only (after install)
-#   ./psg1_linux_vm.sh ssh            # ssh into the running guest
+#   ./psg1_linux_vm.sh run            # boot the (pre-installed) Alpine disk -> root shell
+#   ./psg1_linux_vm.sh run --install  # attach the ISO to (re)install from scratch
+#   ./psg1_linux_vm.sh setup          # install deps, fetch ISO, create a blank disk
+#   ./psg1_linux_vm.sh ssh            # ssh into the running guest (root/root)
 #   ./psg1_linux_vm.sh probe          # just report KVM / SD status
+#
+# The shipped alpine.qcow2 is PRE-INSTALLED and autologins to a root shell on the
+# serial console (root password also root/root). It was built on an aarch64 KVM
+# host — see PSG1_CYBERDECK_OPS.md. On the PSG1, scoped storage hides /storage from
+# the app, so the SD isn't auto-detected: pass SD= explicitly.
 #
 # Config via env:
 #   DISTRO=alpine|debian   (default: alpine — tiny, boots fast even under TCG)
-#   SD=/storage/XXXX-XXXX  (default: auto-detected)
-#   VM_MEM=2048  VM_CPUS=4  DISK_GB=8   SSH_PORT=2222
+#   SD=/storage/XXXX-XXXX  (default: auto-detect; MUST be set explicitly on the PSG1)
+#   VM_MEM=2048  VM_CPUS=4  DISK_GB=3   SSH_PORT=2222
 
 set -euo pipefail
 
 DISTRO="${DISTRO:-alpine}"
 VM_MEM="${VM_MEM:-2048}"
 VM_CPUS="${VM_CPUS:-4}"
-DISK_GB="${DISK_GB:-8}"
+DISK_GB="${DISK_GB:-3}"   # <=3 GB keeps a fresh qcow2 under FAT32's 4 GB file cap
 SSH_PORT="${SSH_PORT:-2222}"
 
 # Pinned image versions — bump these as newer releases land.
@@ -118,10 +123,10 @@ setup_alpine() {
   local url="https://dl-cdn.alpinelinux.org/alpine/v$ALPINE_REL/releases/aarch64/alpine-virt-$ALPINE_VER-aarch64.iso"
   [ -f "$iso" ]  || { log "downloading Alpine $ALPINE_VER"; wget -O "$iso" "$url"; }
   [ -f "$disk" ] || { log "creating $DISK_GB GB disk on SD"; qemu-img create -f qcow2 "$disk" "${DISK_GB}G"; }
-  log "Alpine ready. First 'run' boots the installer ISO:"
-  log "  at the login prompt type: root  (no password)"
-  log "  then run: setup-alpine   (install target: /dev/vda, then poweroff)"
-  log "  after install:  ./psg1_linux_vm.sh run --no-cd"
+  log "Blank Alpine disk ready. Build from scratch:  ./psg1_linux_vm.sh run --install"
+  log "  login: root (no password), then: setup-disk -m sys /dev/vda   (or setup-alpine)"
+  log "  poweroff when done; afterwards plain 'run' boots the installed disk."
+  log "  (The shipped alpine.qcow2 is already prebuilt + autologin — no install needed.)"
 }
 
 setup_debian() {
@@ -157,7 +162,7 @@ EOF
 
 # --- boot --------------------------------------------------------------------
 run_vm() {
-  local no_cd="${1:-}"
+  local mode="${1:-}"
   local uefi; uefi="$(find_uefi)" || die "aarch64 UEFI firmware not found under \$PREFIX/share/qemu"
   local accel="kvm:tcg" cpu="max"
   [ "$(kvm_status)" = "usable" ] && { accel="kvm:tcg"; cpu="host"; }
@@ -173,7 +178,8 @@ run_vm() {
   case "$DISTRO" in
     alpine)
       args+=(-drive "if=virtio,file=$SD/alpine.qcow2,format=qcow2")
-      [ "$no_cd" != "--no-cd" ] && args+=(-cdrom "$SD/alpine-virt-$ALPINE_VER-aarch64.iso")
+      # the disk is pre-installed; attach the installer ISO only for --install
+      [ "$mode" = "--install" ] && args+=(-cdrom "$SD/alpine-virt-$ALPINE_VER-aarch64.iso")
       ;;
     debian)
       args+=(-drive "if=virtio,file=$SD/debian-$DEBIAN_CODENAME-arm64.qcow2,format=qcow2")
@@ -207,5 +213,5 @@ case "${1:-run}" in
   ssh)
     exec ssh -p "$SSH_PORT" "${2:-root}@localhost"
     ;;
-  *) die "usage: $0 {setup|run [--no-cd]|ssh [user]|probe}" ;;
+  *) die "usage: $0 {setup|run [--install]|ssh [user]|probe}" ;;
 esac

@@ -177,6 +177,16 @@ Helper: **`psg1_linux_vm.sh`** (run it in Termux on a working PSG1):
   Pure CPU is ~**15×**: SHA-256 of 100 MB took **121 ms native vs 1885 ms under
   TCG** (qemu-user, same A76). Fine for a CLI / kernel sandbox; miserable as a
   daily driver — which is why proot is the everyday path.
+- **The shipped disk is pre-installed + autologin.** `alpine.qcow2` on the card is
+  a finished Alpine `sys` install, **built on an aarch64 KVM host** (seconds; a TCG
+  install on-device would be brutal — that's why we don't do it on the PSG1). It
+  **autologins to a root shell** on the serial console — `inittab` runs
+  `ttyAMA0::respawn:/bin/login -f root` (busybox `getty` has no `-a`, so `login -f`
+  is the way; `root/root` is set too). A removable-path UEFI loader
+  (`/EFI/BOOT/BOOTAA64.EFI`) is added so it boots under the PSG1's `-bios` without
+  an NVRAM entry. On-device it boots straight to a shell in **~175 s** (TCG):
+  `SD=/storage/XXXX-XXXX ./psg1_linux_vm.sh run`. `run --install` re-attaches the
+  ISO for a fresh build.
 - **`SD=` must be set explicitly.** The script's `detect_sd` globs `/storage/*`,
   but Android scoped storage won't let the app *list* `/storage` even with
   all-files access (direct paths like `/storage/F230-402C` work fine). So run e.g.
