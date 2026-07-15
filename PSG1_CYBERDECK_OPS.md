@@ -171,6 +171,16 @@ Helper: **`psg1_linux_vm.sh`** (run it in Termux on a working PSG1):
   unreachable (OTP secure boot), so the kernel can't be rebuilt to add KVM.
   → For anything interactive use the **GUI desktop over VNC** (below); keep QEMU
   for when you specifically need a *separate* kernel.
+- **Measured TCG cost (Alpine `virt`, `-cpu max`, 4 vCPU / 2 GB, 2026-07):**
+  boot-to-login **196 s** (~3m16s) vs single-digit seconds on KVM/native — and the
+  first ~50 s of that is UEFI + GRUB alone (firmware emulation is the worst case).
+  Pure CPU is ~**15×**: SHA-256 of 100 MB took **121 ms native vs 1885 ms under
+  TCG** (qemu-user, same A76). Fine for a CLI / kernel sandbox; miserable as a
+  daily driver — which is why proot is the everyday path.
+- **`SD=` must be set explicitly.** The script's `detect_sd` globs `/storage/*`,
+  but Android scoped storage won't let the app *list* `/storage` even with
+  all-files access (direct paths like `/storage/F230-402C` work fine). So run e.g.
+  `SD=/storage/XXXX-XXXX ./psg1_linux_vm.sh run`.
 - **The card must be FAT32 — this kernel has no exFAT.** `CONFIG_EXFAT_FS` is
   **not set** in the `6.1.115-abplaysolana` kernel (only `CONFIG_VFAT_FS`), so an
   exFAT card enumerates but Android reports it `unmountable` (`sm list-volumes`).
