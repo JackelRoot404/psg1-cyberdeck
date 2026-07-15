@@ -202,6 +202,14 @@ chmod +x ~/vm
   root@localhost` from Termux — the guest's :22 is host-forwarded to the device's
   localhost:2222) lands a root shell. Key auth for the jumpbox + Termux keys,
   `root/root` as a password fallback. Reachable ~100–175 s after `run`.
+- **The SD card is shared into the VM at `/mnt/card`.** The launcher adds a
+  virtio-9p passthrough (`-virtfs local,path=$SD,mount_tag=card,security_model=none`),
+  and the image auto-mounts it at boot via `/etc/local.d/card.start` (which does
+  `modprobe 9pnet_virtio 9p; mount -t 9p -o trans=virtio,version=9p2000.L card
+  /mnt/card`). So the 231 GB card is one shared workspace across Android, the proot
+  desktop (`/mnt/card` there too), and the VM — a file written in one shows up in
+  the others. (It also exposes the VM's own `alpine.qcow2` under `/mnt/card`; don't
+  write to that file from inside the guest.)
 - **`-accel` fix:** the script shipped with `-accel kvm:tcg`, which QEMU rejects
   (`invalid accelerator`) — the `kvm:tcg` colon-fallback is only valid with
   `-machine accel=`. It now selects `-accel kvm` (if `/dev/kvm` is usable) or
