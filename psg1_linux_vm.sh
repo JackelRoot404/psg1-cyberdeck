@@ -193,6 +193,16 @@ run_vm() {
     *) die "unknown DISTRO: $DISTRO (use alpine|debian)";;
   esac
 
+  # Guard: QEMU write-locks the disk, so only one VM per image can run. Catch a
+  # running instance here with a clear message instead of the raw lock error.
+  local disk="$SD/alpine.qcow2"
+  [ "$DISTRO" = debian ] && disk="$SD/debian-$DEBIAN_CODENAME-arm64.qcow2"
+  if command -v pgrep >/dev/null 2>&1 && pgrep -f "$disk" >/dev/null 2>&1; then
+    die "A VM is already running with $disk (QEMU locks the disk — one at a time).
+     reach it:  tmux ls   then   tmux attach -t <name>
+     stop it:   tmux kill-session -t <name>   (a foreground 'run' just needs its window closed)"
+  fi
+
   probe
   log "booting $DISTRO VM  (accel=$accel, ${VM_CPUS} vCPU, ${VM_MEM} MB)"
   log "ssh in from another Termux session:  ssh -p $SSH_PORT <user>@localhost"
