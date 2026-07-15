@@ -24,17 +24,20 @@
 # device). NOTE: authored off-device; on first run verify the SD mount and the
 # `ls -l /dev/kvm` result (the script prints both).
 #
-# Usage:
-#   ./psg1_linux_vm.sh run            # boot the (pre-installed) Alpine disk -> root shell
-#   ./psg1_linux_vm.sh run --install  # attach the ISO to (re)install from scratch
-#   ./psg1_linux_vm.sh setup          # install deps, fetch ISO, create a blank disk
-#   ./psg1_linux_vm.sh ssh            # ssh into the running guest (root/root)
-#   ./psg1_linux_vm.sh probe          # just report KVM / SD status
+# Subcommands (invoke with `bash`, NOT `./` — see the note below):
+#   run            # boot the (pre-installed) Alpine disk -> root shell
+#   run --install  # attach the ISO to (re)install from scratch
+#   setup          # install deps, fetch ISO, create a blank disk
+#   ssh            # ssh into the running guest (root/root)
+#   probe          # just report KVM / SD status
 #
 # The shipped alpine.qcow2 is PRE-INSTALLED and autologins to a root shell on the
 # serial console (root password also root/root). It was built on an aarch64 KVM
 # host — see PSG1_CYBERDECK_OPS.md. On the PSG1, scoped storage hides /storage from
-# the app, so the SD isn't auto-detected: pass SD= explicitly.
+# the app, so the SD isn't auto-detected: pass SD= explicitly. And the SD card is
+# mounted noexec + Termux has no /usr/bin/env, so run this with `bash`, not `./`:
+#   SD=/storage/XXXX-XXXX bash /storage/XXXX-XXXX/psg1_linux_vm.sh run
+# (or drop a ~/vm wrapper in Termux home — see PSG1_CYBERDECK_OPS.md).
 #
 # Config via env:
 #   DISTRO=alpine|debian   (default: alpine — tiny, boots fast even under TCG)
@@ -123,7 +126,7 @@ setup_alpine() {
   local url="https://dl-cdn.alpinelinux.org/alpine/v$ALPINE_REL/releases/aarch64/alpine-virt-$ALPINE_VER-aarch64.iso"
   [ -f "$iso" ]  || { log "downloading Alpine $ALPINE_VER"; wget -O "$iso" "$url"; }
   [ -f "$disk" ] || { log "creating $DISK_GB GB disk on SD"; qemu-img create -f qcow2 "$disk" "${DISK_GB}G"; }
-  log "Blank Alpine disk ready. Build from scratch:  ./psg1_linux_vm.sh run --install"
+  log "Blank Alpine disk ready. Build from scratch:  bash $0 run --install"
   log "  login: root (no password), then: setup-disk -m sys /dev/vda   (or setup-alpine)"
   log "  poweroff when done; afterwards plain 'run' boots the installed disk."
   log "  (The shipped alpine.qcow2 is already prebuilt + autologin — no install needed.)"

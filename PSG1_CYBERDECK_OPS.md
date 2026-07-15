@@ -148,14 +148,24 @@ with its own kernel** in QEMU on top of Android, no root and no unlock. The
 guest disk image lives on an SD card, so the card genuinely holds the OS — it's
 just booted by the hypervisor inside Android rather than at power-on.
 
-Helper: **`psg1_linux_vm.sh`** (run it in Termux on a working PSG1):
+Helper: **`psg1_linux_vm.sh`** (runs in Termux on the PSG1). **Invoke it with
+`bash`, not `./`** — the SD card is mounted `noexec` and Termux has no
+`/usr/bin/env` (the script's shebang), so `./psg1_linux_vm.sh` fails with a
+misleading `no such file or directory`. Also pass `SD=` explicitly: scoped storage
+hides `/storage` from the app, so the script's auto-detect can't enumerate it.
 
 ```sh
-./psg1_linux_vm.sh probe            # report SD mount + KVM status
-./psg1_linux_vm.sh setup            # install qemu, fetch image, make disk on SD
-./psg1_linux_vm.sh run              # boot (Alpine installer on first run)
-./psg1_linux_vm.sh run --no-cd      # boot from disk after install
-./psg1_linux_vm.sh ssh              # ssh into the guest
+SD=/storage/XXXX-XXXX bash /storage/XXXX-XXXX/psg1_linux_vm.sh run        # boot pre-installed Alpine -> root shell
+SD=/storage/XXXX-XXXX bash /storage/XXXX-XXXX/psg1_linux_vm.sh ssh        # ssh in (your Termux key, or root/root)
+SD=/storage/XXXX-XXXX bash /storage/XXXX-XXXX/psg1_linux_vm.sh probe      # report SD + KVM status
+SD=/storage/XXXX-XXXX bash /storage/XXXX-XXXX/psg1_linux_vm.sh run --install  # attach ISO to (re)install
+```
+
+That's a mouthful, so drop a one-line wrapper in Termux home (which *is* exec-friendly):
+```sh
+printf '#!%s/bin/bash\nexport SD="${SD:-/storage/XXXX-XXXX}"\nexec bash /storage/XXXX-XXXX/psg1_linux_vm.sh "$@"\n' "$PREFIX" > ~/vm
+chmod +x ~/vm
+# then just:  ~/vm run  |  ~/vm ssh  |  ~/vm probe
 ```
 
 - Defaults to **Alpine** (tiny, boots fast even emulated). `DISTRO=debian` for a
@@ -185,10 +195,10 @@ Helper: **`psg1_linux_vm.sh`** (run it in Termux on a working PSG1):
   is the way; `root/root` is set too). A removable-path UEFI loader
   (`/EFI/BOOT/BOOTAA64.EFI`) is added so it boots under the PSG1's `-bios` without
   an NVRAM entry. On-device it boots straight to a shell in **~175 s** (TCG):
-  `SD=/storage/XXXX-XXXX ./psg1_linux_vm.sh run`. `run --install` re-attaches the
-  ISO for a fresh build.
+  `~/vm run` (via the wrapper above — the card is `noexec`, so it must be run with
+  `bash`, not `./`). `run --install` re-attaches the ISO for a fresh build.
 - **SSH into it:** the image has `openssh` enabled at boot with `eth0` on DHCP, so
-  once it's up, `SD=/storage/XXXX-XXXX ./psg1_linux_vm.sh ssh` (i.e. `ssh -p 2222
+  once it's up, `~/vm ssh` (i.e. `ssh -p 2222
   root@localhost` from Termux — the guest's :22 is host-forwarded to the device's
   localhost:2222) lands a root shell. Key auth for the jumpbox + Termux keys,
   `root/root` as a password fallback. Reachable ~100–175 s after `run`.
@@ -199,7 +209,8 @@ Helper: **`psg1_linux_vm.sh`** (run it in Termux on a working PSG1):
 - **`SD=` must be set explicitly.** The script's `detect_sd` globs `/storage/*`,
   but Android scoped storage won't let the app *list* `/storage` even with
   all-files access (direct paths like `/storage/F230-402C` work fine). So run e.g.
-  `SD=/storage/XXXX-XXXX ./psg1_linux_vm.sh run`.
+  `SD=/storage/XXXX-XXXX bash /storage/XXXX-XXXX/psg1_linux_vm.sh run` (or use the
+  `~/vm` wrapper above, which presets it).
 - **The card must be FAT32 — this kernel has no exFAT.** `CONFIG_EXFAT_FS` is
   **not set** in the `6.1.115-abplaysolana` kernel (only `CONFIG_VFAT_FS`), so an
   exFAT card enumerates but Android reports it `unmountable` (`sm list-volumes`).
