@@ -320,11 +320,15 @@ Restore (push a file to the device, then run in Termux):
 
 ## Reboot survival
 
-**WARNING:** PlaySolana firmware disables `com.termux`, `com.termux.boot`, `com.tailscale.ipn`, `moe.shizuku.privileged.api`, `app.lawnchair`, and more at every reboot. Disabled apps don't receive `BOOT_COMPLETED` → sshd won't start → device boots into "remotely unusable" state without intervention.
+**What disables things:** a native system daemon, **`vendor.playsolana.svalguard-service`** (SvalGuard), re-disables `com.termux`, `com.termux.boot`, `com.tailscale.ipn`, `moe.shizuku.privileged.api`, `app.lawnchair` and friends on *every* boot — which is why `pm enable` doesn't stick. No app on the device holds `CHANGE_COMPONENT_ENABLED_STATE`, so it's enforced below the app layer. It **can't be neutralised without root** (OTP-fused bootloader → no root), and every candidate on-device auto-recovery helper (Termux:Boot, Shizuku) is *itself* in the kill list — so a fully autonomous **on-device** self-heal isn't possible here. The keepalive is the workaround.
 
-**Mitigation:** Keepalive script (`psg1_keepalive.sh`, in the repo) on the jumpbox runs every 5 min via cron: re-enables disabled packages, re-asserts `always_on_vpn_app` + `private_dns_mode`, and — once `com.termux` is back — cold-starts Termux with `am start` whenever sshd isn't listening. The cold start opens a fresh login session that sources `~/.bashrc`, whose guard line restarts `sshd`. Net effect: **after a reboot, sshd self-recovers within ≤5 min, no manual step.** (Termux:Boot's `10-sshd` still can't fire — the package is disabled during the boot window — so this `am start` path is what actually brings sshd back.) Silent when no action needed.
+**Keepalive (`psg1_keepalive.sh`, jumpbox, every 5 min via cron):** re-enables the disabled packages, re-asserts `always_on_vpn_app` + `private_dns_mode`, and — once `com.termux` is back — cold-starts Termux with `am start` whenever sshd isn't listening (the fresh login sources `~/.bashrc`, whose guard restarts `sshd`; Termux:Boot can't fire since the package is disabled during the boot window). Silent on no-op. **After a reboot, sshd self-recovers within ≤5 min.**
 
-**Worst case (jumpbox itself down + PSG1 rebooted):** the auto-recovery can't run, so fall back to manual — open Termux on the device, run `sshd`, then open Tailscale and tap Connect. After that the jumpbox is reachable again.
+**Off the cable (untethered keepalive).** The keepalive reaches the deck over USB *or the network*. Enable persistent network adb on the deck once — `adb shell setprop persist.adb.tcp.port 5555` — which survives reboots (a system-level adb setting SvalGuard doesn't touch; adbd then listens on TCP:5555 at every boot, key-authorized). Then point the keepalive at it: `PSG1_ADB_TARGETS="<deck-lan-ip>:5555 <deck-tailnet-ip>:5555"`. Now it heals the deck after a reboot even undocked, as long as the jumpbox can reach it.
+- **Post-reboot recovery goes over the LAN endpoint** — Tailscale is disabled on boot, so the tailnet endpoint can't reach the deck until the LAN path re-enables it first. Give the deck a **stable LAN address (DHCP reservation)** for this to be reliable.
+- **Security:** this opens a reboot-persistent, network-reachable adb port. It's gated by adb key auth (only authorized hosts connect; anyone else just gets an ignored prompt), but with no root we can't firewall it to only Tailscale — it listens on all interfaces. Fine on a trusted LAN/tailnet; a small surface on hostile WiFi. Revert with `setprop persist.adb.tcp.port -1` + reboot.
+
+**Field recovery (no jumpbox reachable at all).** You're holding the deck, so: Settings → Apps → enable **Termux** and **Tailscale** → open Termux, run `termux-wake-lock; sshd` → open Tailscale, Connect. A minute of taps and it's back. Dead battery is the main *involuntary* reboot trigger, so keeping it charged avoids the whole thing.
 
 ## What is NOT done
 
@@ -332,4 +336,4 @@ Restore (push a file to the device, then run in Termux):
 - NetGuard firewalling — gave up the VPN slot to Tailscale instead
 - External monitor: only verified the kernel claims DP-alt support; no hub plugged in yet to confirm hand-off
 - Native solana-cli — see Solana section above; JS SDK is the supported path
-- Pinpointing the boot-time package disabler — works around it with the keepalive
+- Neutralising the boot-time disabler — **identified** as `vendor.playsolana.svalguard-service` (native, runs below the app layer), but stopping it needs root; worked around with the keepalive (now reachable over network adb, not just USB)
