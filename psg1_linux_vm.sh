@@ -177,6 +177,8 @@ run_vm() {
     -bios "$uefi"
     -netdev "user,id=n0,hostfwd=tcp::${SSH_PORT}-:22"
     -device virtio-net-pci,netdev=n0
+    # share the SD card into the guest (virtio-9p); guest mounts tag "card" at /mnt/card
+    -virtfs "local,path=$SD,mount_tag=card,security_model=none,multidevs=remap"
     -nographic
   )
 
