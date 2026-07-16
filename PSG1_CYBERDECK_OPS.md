@@ -320,15 +320,114 @@ Restore (push a file to the device, then run in Termux):
 
 ## Reboot survival
 
-**What disables things:** a native system daemon, **`vendor.playsolana.svalguard-service`** (SvalGuard), re-disables `com.termux`, `com.termux.boot`, `com.tailscale.ipn`, `moe.shizuku.privileged.api`, `app.lawnchair` and friends on *every* boot — which is why `pm enable` doesn't stick. No app on the device holds `CHANGE_COMPONENT_ENABLED_STATE`, so it's enforced below the app layer. It **can't be neutralised without root** (OTP-fused bootloader → no root), and every candidate on-device auto-recovery helper (Termux:Boot, Shizuku) is *itself* in the kill list — so a fully autonomous **on-device** self-heal isn't possible here. The keepalive is the workaround.
+> **Measured 2026-07-15**, the first time the cycle was ever actually exercised. Everything
+> below that says "measured" was observed; everything that says "assumed" is inherited from
+> earlier sessions and did **not** reproduce. Several long-standing claims in this section
+> turned out to be wrong — they're called out rather than quietly deleted, because the wrong
+> model shaped the whole design.
 
-**Keepalive (`psg1_keepalive.sh`, jumpbox, every 5 min via cron):** re-enables the disabled packages, re-asserts `always_on_vpn_app` + `private_dns_mode`, and — once `com.termux` is back — cold-starts Termux with `am start` whenever sshd isn't listening (the fresh login sources `~/.bashrc`, whose guard restarts `sshd`; Termux:Boot can't fire since the package is disabled during the boot window). Silent on no-op. **After a reboot, sshd self-recovers within ≤5 min.**
+### The unlock gate (measured — this dominates everything)
+
+The deck has a **lock credential** and file-based encryption (`ro.crypto.type=file`). Termux
+is **not** direct-boot aware, so its home — including the `~/.bashrc` sshd guard — lives in
+credential-encrypted storage that does not exist until the first manual unlock. `BOOT_COMPLETED`
+is likewise withheld until then. Check with `getprop sys.user.0.ce_available` and
+`dumpsys user | grep RUNNING_UNLOCKED` (**not** `ls /data/user/0/com.termux` — the shell gets
+"Permission denied" whether locked or not, so that probe reads "locked" always and proves nothing).
+
+**Consequence: after a reboot, nothing brings sshd back until a human unlocks the deck.** No
+jumpbox, no network adb, and no amount of `am start` can cross that line. Since unlocking means
+physically holding the deck — at which point sshd returns on its own in seconds — **autonomous
+untethered post-reboot recovery is not achievable on this device while a lock credential is set.**
+That is a property of the platform, not a bug to fix.
+
+### What actually happened (measured)
+
+```
+17:59:24  reboot issued
+17:59:49  adbd back (6s). persist.adb.tcp.port survived; adbd listening on 5555.
+          WiFi rejoined unaided, same IP, no DHCP drift.
+18:00:01  keepalive tick: "cold-starting Termux" — no effect, device locked
+          ... deck sits at keyguard. sshd down. ALL PACKAGES STILL ENABLED ...
+18:03:18  manual unlock          <-- the hard gate
+18:03:20  BOOT_COMPLETED -> Termux:Boot starts -> runs start-sshd.sh
+18:03:31  sshd listening (13s after unlock). The keepalive contributed nothing.
+```
+
+### Claims that did not survive the test
+
+- ~~"SvalGuard re-disables the packages on *every* boot"~~ — **it disabled nothing, and it was
+  never the culprit.** See "SvalGuard was misidentified" below. All five packages stayed
+  `enabled=1`, `always_on_vpn_app` survived, and logcat shows no `setEnabledSetting` calls and no
+  SvalGuard log lines at all.
+- ~~"Termux:Boot can't fire — it's disabled during the boot window"~~ — **it fired and did the
+  entire recovery**, executing `start-sshd.sh` 2s after unlock. It only can't fire on boots where
+  SvalGuard actually disables it.
+- ~~"After a reboot, sshd self-recovers within ≤5 min"~~ — it recovers **13s after a manual
+  unlock**, via Termux:Boot, not the keepalive. Without the unlock it never recovers at all.
+- ~~"Heals the deck after a reboot even undocked"~~ — see the unlock gate: impossible in principle,
+  and it was also broken in practice (see the adb bugs below).
+
+**Tailscale did not come back** after the reboot: `tun0` had no address 15 min later despite the
+package being enabled and `always_on_vpn_app` set to it. So the tailnet endpoint is a black hole
+after every reboot — it likely needs the app opened by hand. Do not rely on it for recovery.
+
+### SvalGuard was misidentified (investigated 2026-07-16)
+
+**`vendor.playsolana.svalguard-service` is the Solana Seed Vault's key-custody HAL. It has nothing
+to do with disabling packages.** The evidence:
+
+- `/vendor/etc/init/svalguard-default.rc` declares it `class hal`, exposing the AIDL interface
+  `vendor.playsolana.svalguard.IPlaySolanaSvalGuard/default`. A HAL waits on binder calls; it
+  doesn't roam around calling `pm`.
+- Its own strings are `IPlaySolanaSvalGuard::hash`, `Invalid signature size`, **`Invalid mnemonic
+  size`**, `Invalid public key size`. A *mnemonic* is a BIP-39 seed phrase — this thing holds the
+  wallet seed. "SvalGuard" is almost certainly *Seed VAuLt Guard*.
+- The `/system/priv-app/SvalguardApp/SvalguardApp.apk` beside it is `com.solanamobile.seedvaultimpl`.
+- It contains **zero** references to any package in the alleged kill list.
+
+**How the misidentification happened:** by elimination plus a suggestive name — no app held
+`CHANGE_COMPONENT_ENABLED_STATE`, therefore the disabler must be native, therefore it must be the
+native PlaySolana daemon with "Guard" in its name. That accused the wallet's key custody service.
+
+**`lastDisabledCaller` is a dead end.** Every kill-list package reads `shell:1000`, which looks
+like a system-uid culprit — but a `pm disable-user` typed at an adb prompt (uid 2000) produces the
+*same* string, because `cmd package` executes inside system_server (uid 1000). It records "someone
+used `pm`", not who. Verified with a deliberate control.
+
+**There may be no boot-time disabler at all.** Searching `/vendor`, `/system/bin`, `/system/etc`
+and `/system/priv-app` for `com.termux`, `com.tailscale.ipn` and `moe.shizuku.privileged.api`
+returns **zero files**. `playsolana_setup` (a root oneshot, the one component that plausibly could)
+has 41 strings total, none package-related.
+
+**The parsimonious explanation that fits every observation:** the packages were disabled *once*, by
+a human or agent via `pm disable-user`, and stayed disabled — persistent state, exactly as designed.
+"Still disabled after each reboot" was then read as "re-disabled at each boot", and the hunt for a
+boot-time culprit followed from there. Once they were genuinely enabled, they stayed enabled across
+the measured reboot.
+
+**Caveats — this is not proof.** One boot; a negative can't be proven; the search didn't cover
+`/system/app`, `/system/framework`, `/product` or `/system_ext`; `/data/vendor/svalguard` is
+unreadable (0700 system); and a stripped binary could build strings at runtime. **Keep the keepalive**
+— it's cheap insurance and harmless when idle. But treat "a vendor daemon fights us every boot" as
+**unsupported**, and don't build anything else on it. A second reboot would firm this up.
+
+### What the keepalive is actually for
+
+Not post-reboot self-heal — the unlock gate owns that. It's a **safety net for boots where
+SvalGuard does disable things** (which is how this project started, so it evidently happens),
+and for re-asserting `always_on_vpn_app` / `private_dns_mode` if they get cleared. On a boot like
+the one measured, it is a no-op and Termux:Boot does the work.
+
+**Keepalive (`psg1_keepalive.sh`, jumpbox, every 5 min via cron):** re-enables the packages,
+re-asserts `always_on_vpn_app` + `private_dns_mode`, and — once `com.termux` is back — cold-starts
+Termux with `am start` whenever sshd isn't listening. Silent on no-op.
 
 **Cron runs a copy under `~/bin`, never the git tree.** Install/refresh it with `./psg1_keepalive_install.sh`:
 
 ```crontab
 PATH=/usr/local/bin:/usr/bin:/bin
-*/5 * * * * PSG1_ADB_TARGETS="192.168.2.32:5555 100.64.30.85:5555" /home/pi/bin/psg1_keepalive.sh >>/home/pi/psg1_keepalive.log 2>&1
+*/5 * * * * PSG1_ADB_TARGETS="192.168.2.32:5555 100.64.30.85:5555" timeout 240 /home/pi/bin/psg1_keepalive.sh >>/home/pi/psg1_keepalive.log 2>&1
 ```
 
 The explicit `PATH=` matters — cron's default environment is too bare to find `adb`. An empty `psg1_keepalive.log` is the healthy state; it only writes when it actually repairs something.
@@ -343,9 +442,19 @@ head -3 ~/bin/psg1_keepalive.sh       # what's actually running, and from where
 
 **After changing `psg1_keepalive.sh`, re-run the installer — otherwise cron keeps running the old copy.**
 
-**Off the cable (untethered keepalive).** The keepalive reaches the deck over USB *or the network*. Enable persistent network adb on the deck once — `adb shell setprop persist.adb.tcp.port 5555` — which survives reboots (a system-level adb setting SvalGuard doesn't touch; adbd then listens on TCP:5555 at every boot, key-authorized). Then point the keepalive at it: `PSG1_ADB_TARGETS="<deck-lan-ip>:5555 <deck-tailnet-ip>:5555"`. Now it heals the deck after a reboot even undocked, as long as the jumpbox can reach it.
-- **Post-reboot recovery goes over the LAN endpoint** — Tailscale is disabled on boot, so the tailnet endpoint can't reach the deck until the LAN path re-enables it first.
+**Off the cable (network adb).** The keepalive reaches the deck over USB *or the network*. Enable persistent network adb on the deck once — `adb shell setprop persist.adb.tcp.port 5555` — which survives reboots (measured: adbd was listening on 5555 six seconds after boot, key-authorized).
+
+**What this is not.** It does *not* buy untethered post-reboot recovery — the unlock gate above forecloses that, and network adb cannot unlock a device. It's useful for reaching the deck undocked *while it's already unlocked and running*, and for re-enabling packages remotely. It is not a recovery channel for a rebooted deck.
+
+- **The tailnet endpoint is a black hole after a reboot** (measured) — Tailscale doesn't come back on its own, so `100.64.x.y:5555` doesn't route. Keeping it in `PSG1_ADB_TARGETS` is harmless now only because connects are bounded; before that it hung every tick for >2 min.
 - **Security:** this opens a reboot-persistent, network-reachable adb port. It's gated by adb key auth (only authorized hosts connect; anyone else just gets an ignored prompt), but with no root we can't firewall it to only Tailscale — it listens on all interfaces. Fine on a trusted LAN/tailnet; a small surface on hostile WiFi. Revert with `setprop persist.adb.tcp.port -1` + reboot.
+
+**Two jumpbox-side adb bugs the reboot test found** (both fixed in `psg1_keepalive.sh`; neither was findable by reading the script):
+
+1. **Stale transports are permanent.** After the deck reboots, its TCP transport goes `offline` and stays there. `adb connect` answers *"already connected"*; `adb disconnect` + `adb connect` answers the same; `adb reconnect offline` says *"reconnecting"* and changes nothing. **Only `adb kill-server` clears it.** The keepalive's own connects during the boot window create these, so every real reboot poisoned the server and the network path silently did nothing, forever. The script now restarts the adb server when nothing live is found but offline entries exist.
+2. **`adb connect` hangs >2 min** on an address that black-holes rather than refusing — exactly the tailnet endpoint's post-reboot state. Every tick burned minutes and cron stacked them. All connects are now bounded (`PSG1_CONNECT_TIMEOUT`, default 5s), and cron wraps the script in `timeout 240` as a backstop.
+
+**Field recovery is the real answer.** You have to unlock the deck by hand anyway, so: unlock → if sshd isn't back in ~15s, Settings → Apps → enable **Termux** → open it (`~/.bashrc` restarts sshd) → open **Tailscale**, Connect. Keeping the deck charged avoids the involuntary reboot that starts all this.
 
 **Finding the deck (three steps).** The keepalive locates the deck in this order, so a moved lease isn't fatal:
 1. **USB** — auto-detected whenever docked, and preferred when present.
@@ -358,7 +467,7 @@ A DHCP reservation for the deck is therefore a *nice-to-have* rather than load-b
 - **MAC randomisation.** Android randomises its MAC per-SSID by default, so the baked-in `PSG1_MAC` is only valid on the network it was read on. On a new SSID, read the deck's MAC there (`adb shell cat /sys/class/net/wlan0/address`) and pass it via `PSG1_MAC`.
 - Discovery only sweeps `/24`s, so the tailnet (a `/32`) is never swept.
 
-**Field recovery (no jumpbox reachable at all).** You're holding the deck, so: Settings → Apps → enable **Termux** and **Tailscale** → open Termux, run `termux-wake-lock; sshd` → open Tailscale, Connect. A minute of taps and it's back. Dead battery is the main *involuntary* reboot trigger, so keeping it charged avoids the whole thing.
+The explicit `PATH=` matters — cron's default environment is too bare to find `adb`. The `timeout 240` is a backstop: an adb call that hangs must never let cron stack ticks (it did, before connects were bounded).
 
 ## What is NOT done
 
@@ -366,6 +475,8 @@ A DHCP reservation for the deck is therefore a *nice-to-have* rather than load-b
 - NetGuard firewalling — gave up the VPN slot to Tailscale instead
 - External monitor: only verified the kernel claims DP-alt support; no hub plugged in yet to confirm hand-off
 - Native solana-cli — see Solana section above; JS SDK is the supported path
-- Neutralising the boot-time disabler — **identified** as `vendor.playsolana.svalguard-service` (native, runs below the app layer), but stopping it needs root; worked around with the keepalive (reachable over network adb, and self-locating by MAC — not just USB)
-- **A full post-reboot recovery cycle has never actually been exercised.** Every piece is verified in isolation (cron fires, keepalive repairs a real disable, network adb reachable, discovery finds the deck by MAC), but the end-to-end "reboot the deck undocked and watch it heal itself within 5 min" run has not been done — rebooting is discouraged, so this remains reasoned-through rather than observed
-- DHCP reservation for the deck — not set (router at `192.168.2.1` serves DHCP; needs the operator's admin login). Discovery makes this non-critical
+- **Identifying the boot-time disabler — reopened, and it may not exist.** SvalGuard was misidentified (it's the Seed Vault key HAL; see "Reboot survival"). No vendor file references the kill-list packages, and the measured boot disabled nothing. The premise the keepalive was built on is unsupported. Not closed, because a negative can't be proven and the search wasn't exhaustive.
+- **Autonomous untethered post-reboot recovery — not achievable, closed.** The lock credential + FBE means Termux's storage and `BOOT_COMPLETED` are gated on a manual unlock, which no jumpbox can perform. Removing the lock credential would allow it, at an obvious opsec cost on a deck you carry. Not a bug; a platform property.
+- **The undocked (Phase 2) reboot test has not been run** — the docked one was (2026-07-15). So the stale-transport fix is written and reasoned but not yet exercised against a real reboot, and MAC discovery has never run in its actual scenario.
+- **Why Tailscale doesn't come back after a reboot** — `tun0` had no address 15 min post-boot despite the package being enabled and `always_on_vpn_app` set. Unexplained; probably needs the app opened once by hand.
+- DHCP reservation for the deck — not set (router at `192.168.2.1` serves DHCP; needs the operator's admin login). Discovery makes this non-critical, and the deck kept its lease across the measured reboot anyway.
