@@ -376,14 +376,13 @@ targets (**found the deck in 2s**). Tailscale stayed down after unlock **both ti
 - ~~"Heals the deck after a reboot even undocked"~~ — see the unlock gate: impossible in principle,
   and it was also broken in practice (see the adb bugs below).
 
-**Tailscale does not come up *promptly* after a reboot** (reproduced both boots): `tun0` has no
-address and the app isn't running for at least ~2 min past the unlock, despite the package being
-enabled and `always_on_vpn_app` set to it. So the tailnet endpoint is a black hole in the window
-right after a reboot — do not rely on it for recovery; the LAN path is the one that's up early.
-On 2026-07-16 it *was* back ~4 min after unlock, but whether it self-started on a delay or was
-opened by hand (the deck was being handled at the time) was not cleanly isolated — so "needs a
-manual open" vs "auto-starts slowly" is **unresolved**. Either way it is not up when you'd need it
-for early post-reboot recovery. Why "always-on VPN" doesn't start immediately here is unexplained.
+**Tailscale does not auto-start after a reboot — it needs a manual open** (reproduced both boots;
+the 2026-07-16 recovery was confirmed a hand-open by the operator, not a delayed self-start).
+`tun0` has no address and the app isn't running afterward, despite the package being enabled and
+`always_on_vpn_app` set to it, and the unlock does not start it either. So the tailnet endpoint is
+a black hole after every reboot until someone opens the app on the deck — **do not rely on it for
+recovery; the LAN path is the one that comes up early.** Why "always-on VPN" doesn't actually start
+on boot here is unexplained (the setting is present but inert across boots).
 
 ### SvalGuard was misidentified (investigated 2026-07-16)
 
@@ -490,6 +489,6 @@ The explicit `PATH=` matters — cron's default environment is too bare to find 
 - Native solana-cli — see Solana section above; JS SDK is the supported path
 - **Identifying the boot-time disabler — reopened, and it very likely does not exist.** SvalGuard was misidentified (it's the Seed Vault key HAL; see "Reboot survival"). No vendor file references the kill-list packages, and **two** measured boots disabled nothing (n=2). The premise the keepalive was built on is unsupported. Not fully closed only because a negative can't be proven and the file search wasn't exhaustive.
 - **The permanently-stuck offline adb transport is timing-dependent, not universal.** Phase 1 (docked) it stuck and needed `kill-server`; Phase 2 (undocked) the deck's adbd port reopened in ~4s and a plain reconnect recovered it. It sticks when adb connects *during* the boot window (adbd half-up), not after. So the `kill-server` recovery branch is insurance for the unlucky-timing tick, exercised by reasoning + the Phase-1 observation — **not** by Phase 2, which didn't reproduce the stuck state.
-- **Why "always-on VPN" (Tailscale) doesn't come up promptly on boot** — down for ≥2 min past unlock both reboots; on 2026-07-16 back ~4 min after unlock but couldn't isolate self-start vs manual open. Unexplained; the tailnet endpoint is unusable in the early post-reboot window regardless.
+- **Why "always-on VPN" (Tailscale) doesn't auto-start on boot** — needs a manual open, confirmed both reboots (the 2026-07-16 recovery was an operator hand-open). The setting is present but inert across boots; the tailnet endpoint is a black hole until someone opens the app. Unexplained.
 - **Autonomous untethered post-reboot recovery — not achievable, closed.** The lock credential + FBE means Termux's storage and `BOOT_COMPLETED` are gated on a manual unlock, which no jumpbox can perform. Removing the lock credential would allow it, at an obvious opsec cost on a deck you carry. Not a bug; a platform property. (Both the docked and undocked reboot tests are now done — this is settled, not pending.)
 - DHCP reservation for the deck — not set (router at `192.168.2.1` serves DHCP; needs the operator's admin login). Discovery makes this non-critical, and the deck kept its lease across **both** measured reboots anyway.
