@@ -341,7 +341,15 @@ physically holding the deck — at which point sshd returns on its own in second
 untethered post-reboot recovery is not achievable on this device while a lock credential is set.**
 That is a property of the platform, not a bug to fix.
 
-### What actually happened (measured)
+### What actually happened (measured — two reboots, docked then undocked)
+
+Both reboots (2026-07-15 docked, 2026-07-16 undocked over LAN only) played out identically:
+adbd + the network port came back in seconds, the deck kept its IP, **no package was disabled**,
+sshd stayed down through the keyguard, and ~1s after the manual unlock **Termux:Boot** ran
+`start-sshd.sh` and sshd was up. The keepalive contributed nothing to recovery either time.
+The Phase-2 (undocked) run also exercised, against a real reboot: the connect-timeout fix against
+the genuinely black-holed tailnet endpoint (**6s, not >120s**), and MAC discovery with no configured
+targets (**found the deck in 2s**). Tailscale stayed down after unlock **both times** (see below).
 
 ```
 17:59:24  reboot issued
@@ -368,9 +376,11 @@ That is a property of the platform, not a bug to fix.
 - ~~"Heals the deck after a reboot even undocked"~~ — see the unlock gate: impossible in principle,
   and it was also broken in practice (see the adb bugs below).
 
-**Tailscale did not come back** after the reboot: `tun0` had no address 15 min later despite the
-package being enabled and `always_on_vpn_app` set to it. So the tailnet endpoint is a black hole
-after every reboot — it likely needs the app opened by hand. Do not rely on it for recovery.
+**Tailscale does not come back after a reboot** (reproduced both boots): `tun0` has no address and
+the app isn't even running afterward, despite the package being enabled and `always_on_vpn_app` set
+to it — the unlock does *not* start it either. So the tailnet endpoint is a black hole after every
+reboot until the app is opened by hand. Do not rely on it for recovery. Why "always-on VPN" doesn't
+actually start on boot here is unexplained.
 
 ### SvalGuard was misidentified (investigated 2026-07-16)
 
@@ -475,8 +485,8 @@ The explicit `PATH=` matters — cron's default environment is too bare to find 
 - NetGuard firewalling — gave up the VPN slot to Tailscale instead
 - External monitor: only verified the kernel claims DP-alt support; no hub plugged in yet to confirm hand-off
 - Native solana-cli — see Solana section above; JS SDK is the supported path
-- **Identifying the boot-time disabler — reopened, and it may not exist.** SvalGuard was misidentified (it's the Seed Vault key HAL; see "Reboot survival"). No vendor file references the kill-list packages, and the measured boot disabled nothing. The premise the keepalive was built on is unsupported. Not closed, because a negative can't be proven and the search wasn't exhaustive.
-- **Autonomous untethered post-reboot recovery — not achievable, closed.** The lock credential + FBE means Termux's storage and `BOOT_COMPLETED` are gated on a manual unlock, which no jumpbox can perform. Removing the lock credential would allow it, at an obvious opsec cost on a deck you carry. Not a bug; a platform property.
-- **The undocked (Phase 2) reboot test has not been run** — the docked one was (2026-07-15). So the stale-transport fix is written and reasoned but not yet exercised against a real reboot, and MAC discovery has never run in its actual scenario.
-- **Why Tailscale doesn't come back after a reboot** — `tun0` had no address 15 min post-boot despite the package being enabled and `always_on_vpn_app` set. Unexplained; probably needs the app opened once by hand.
-- DHCP reservation for the deck — not set (router at `192.168.2.1` serves DHCP; needs the operator's admin login). Discovery makes this non-critical, and the deck kept its lease across the measured reboot anyway.
+- **Identifying the boot-time disabler — reopened, and it very likely does not exist.** SvalGuard was misidentified (it's the Seed Vault key HAL; see "Reboot survival"). No vendor file references the kill-list packages, and **two** measured boots disabled nothing (n=2). The premise the keepalive was built on is unsupported. Not fully closed only because a negative can't be proven and the file search wasn't exhaustive.
+- **The permanently-stuck offline adb transport is timing-dependent, not universal.** Phase 1 (docked) it stuck and needed `kill-server`; Phase 2 (undocked) the deck's adbd port reopened in ~4s and a plain reconnect recovered it. It sticks when adb connects *during* the boot window (adbd half-up), not after. So the `kill-server` recovery branch is insurance for the unlucky-timing tick, exercised by reasoning + the Phase-1 observation — **not** by Phase 2, which didn't reproduce the stuck state.
+- **Why "always-on VPN" (Tailscale) doesn't start on boot** — reproduced both reboots; needs the app opened by hand. Unexplained.
+- **Autonomous untethered post-reboot recovery — not achievable, closed.** The lock credential + FBE means Termux's storage and `BOOT_COMPLETED` are gated on a manual unlock, which no jumpbox can perform. Removing the lock credential would allow it, at an obvious opsec cost on a deck you carry. Not a bug; a platform property. (Both the docked and undocked reboot tests are now done — this is settled, not pending.)
+- DHCP reservation for the deck — not set (router at `192.168.2.1` serves DHCP; needs the operator's admin login). Discovery makes this non-critical, and the deck kept its lease across **both** measured reboots anyway.
