@@ -356,10 +356,10 @@ That is a property of the platform, not a bug to fix.
 
 ### Claims that did not survive the test
 
-- ~~"SvalGuard re-disables the packages on *every* boot"~~ — **it disabled nothing.** All five
-  packages stayed `enabled=1`, `always_on_vpn_app` survived, and logcat shows no
-  `setEnabledSetting` calls and no SvalGuard log lines at all. SvalGuard *was* running (pid 588).
-  Why it was inert is **unknown** — one boot is one data point, so don't conclude it's dead.
+- ~~"SvalGuard re-disables the packages on *every* boot"~~ — **it disabled nothing, and it was
+  never the culprit.** See "SvalGuard was misidentified" below. All five packages stayed
+  `enabled=1`, `always_on_vpn_app` survived, and logcat shows no `setEnabledSetting` calls and no
+  SvalGuard log lines at all.
 - ~~"Termux:Boot can't fire — it's disabled during the boot window"~~ — **it fired and did the
   entire recovery**, executing `start-sshd.sh` 2s after unlock. It only can't fire on boots where
   SvalGuard actually disables it.
@@ -371,6 +371,46 @@ That is a property of the platform, not a bug to fix.
 **Tailscale did not come back** after the reboot: `tun0` had no address 15 min later despite the
 package being enabled and `always_on_vpn_app` set to it. So the tailnet endpoint is a black hole
 after every reboot — it likely needs the app opened by hand. Do not rely on it for recovery.
+
+### SvalGuard was misidentified (investigated 2026-07-16)
+
+**`vendor.playsolana.svalguard-service` is the Solana Seed Vault's key-custody HAL. It has nothing
+to do with disabling packages.** The evidence:
+
+- `/vendor/etc/init/svalguard-default.rc` declares it `class hal`, exposing the AIDL interface
+  `vendor.playsolana.svalguard.IPlaySolanaSvalGuard/default`. A HAL waits on binder calls; it
+  doesn't roam around calling `pm`.
+- Its own strings are `IPlaySolanaSvalGuard::hash`, `Invalid signature size`, **`Invalid mnemonic
+  size`**, `Invalid public key size`. A *mnemonic* is a BIP-39 seed phrase — this thing holds the
+  wallet seed. "SvalGuard" is almost certainly *Seed VAuLt Guard*.
+- The `/system/priv-app/SvalguardApp/SvalguardApp.apk` beside it is `com.solanamobile.seedvaultimpl`.
+- It contains **zero** references to any package in the alleged kill list.
+
+**How the misidentification happened:** by elimination plus a suggestive name — no app held
+`CHANGE_COMPONENT_ENABLED_STATE`, therefore the disabler must be native, therefore it must be the
+native PlaySolana daemon with "Guard" in its name. That accused the wallet's key custody service.
+
+**`lastDisabledCaller` is a dead end.** Every kill-list package reads `shell:1000`, which looks
+like a system-uid culprit — but a `pm disable-user` typed at an adb prompt (uid 2000) produces the
+*same* string, because `cmd package` executes inside system_server (uid 1000). It records "someone
+used `pm`", not who. Verified with a deliberate control.
+
+**There may be no boot-time disabler at all.** Searching `/vendor`, `/system/bin`, `/system/etc`
+and `/system/priv-app` for `com.termux`, `com.tailscale.ipn` and `moe.shizuku.privileged.api`
+returns **zero files**. `playsolana_setup` (a root oneshot, the one component that plausibly could)
+has 41 strings total, none package-related.
+
+**The parsimonious explanation that fits every observation:** the packages were disabled *once*, by
+a human or agent via `pm disable-user`, and stayed disabled — persistent state, exactly as designed.
+"Still disabled after each reboot" was then read as "re-disabled at each boot", and the hunt for a
+boot-time culprit followed from there. Once they were genuinely enabled, they stayed enabled across
+the measured reboot.
+
+**Caveats — this is not proof.** One boot; a negative can't be proven; the search didn't cover
+`/system/app`, `/system/framework`, `/product` or `/system_ext`; `/data/vendor/svalguard` is
+unreadable (0700 system); and a stripped binary could build strings at runtime. **Keep the keepalive**
+— it's cheap insurance and harmless when idle. But treat "a vendor daemon fights us every boot" as
+**unsupported**, and don't build anything else on it. A second reboot would firm this up.
 
 ### What the keepalive is actually for
 
@@ -435,7 +475,7 @@ The explicit `PATH=` matters — cron's default environment is too bare to find 
 - NetGuard firewalling — gave up the VPN slot to Tailscale instead
 - External monitor: only verified the kernel claims DP-alt support; no hub plugged in yet to confirm hand-off
 - Native solana-cli — see Solana section above; JS SDK is the supported path
-- Neutralising the boot-time disabler — stopping SvalGuard needs root, so it's out of reach. But see "Reboot survival": on the one boot ever measured it **disabled nothing**, and why it was inert is unknown. The premise the keepalive was built on is now in doubt and deserves a proper look.
+- **Identifying the boot-time disabler — reopened, and it may not exist.** SvalGuard was misidentified (it's the Seed Vault key HAL; see "Reboot survival"). No vendor file references the kill-list packages, and the measured boot disabled nothing. The premise the keepalive was built on is unsupported. Not closed, because a negative can't be proven and the search wasn't exhaustive.
 - **Autonomous untethered post-reboot recovery — not achievable, closed.** The lock credential + FBE means Termux's storage and `BOOT_COMPLETED` are gated on a manual unlock, which no jumpbox can perform. Removing the lock credential would allow it, at an obvious opsec cost on a deck you carry. Not a bug; a platform property.
 - **The undocked (Phase 2) reboot test has not been run** — the docked one was (2026-07-15). So the stale-transport fix is written and reasoned but not yet exercised against a real reboot, and MAC discovery has never run in its actual scenario.
 - **Why Tailscale doesn't come back after a reboot** — `tun0` had no address 15 min post-boot despite the package being enabled and `always_on_vpn_app` set. Unexplained; probably needs the app opened once by hand.
