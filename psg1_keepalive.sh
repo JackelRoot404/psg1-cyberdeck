@@ -50,8 +50,25 @@ EXPECT_SERIAL="${PSG1_SERIAL:-PS01-2549-001-A2-002791}"
 EXPECT_MAC="${PSG1_MAC:-78:be:81:2a:28:1a}"
 ADB_PORT="${PSG1_ADB_PORT:-5555}"
 DISCOVER="${PSG1_DISCOVER:-1}"
-CONNECT_TIMEOUT="${PSG1_CONNECT_TIMEOUT:-5}"
-CMD_TIMEOUT="${PSG1_CMD_TIMEOUT:-15}"
+# `timeout 0` means "no limit" in GNU coreutils, and a non-numeric duration makes
+# `timeout` error out — either way a bad override silently breaks the bound it was
+# meant to enforce (a 0 would hang reachable()/connect on a black-hole forever).
+# Clamp anything that isn't a positive number back to the default.
+sane_timeout() {  # value default -> value if a positive number, else default
+  case "$1" in
+    ''|0|0.0|*[!0-9.]*) printf '%s' "$2" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+CONNECT_TIMEOUT="$(sane_timeout "${PSG1_CONNECT_TIMEOUT:-5}" 5)"
+CMD_TIMEOUT="$(sane_timeout "${PSG1_CMD_TIMEOUT:-15}" 15)"
+# 2s, not 1s: the kernel retransmits a dropped SYN at ~1s (TCP_TIMEOUT_INIT), so a
+# 1s probe races that retransmit and can skip a live-but-lossy deck that the 5s
+# `adb connect` would reach. 2s sits between the 1s and 3s retransmit boundaries —
+# it tolerates a single dropped SYN and still fails a true black-hole in 2s (vs 5s).
+# (A doubly-lossy link needing the 3s retransmit can still skip one tick and
+# self-heal next tick; matching connect's full budget would mean ~4s, near-useless.)
+PROBE_TIMEOUT="$(sane_timeout "${PSG1_PROBE_TIMEOUT:-2}" 2)"
 
 ts="$(date '+%Y-%m-%d %H:%M:%S')"
 
@@ -85,6 +102,18 @@ has_offline() {
   adb devices 2>/dev/null | awk '$2=="offline"{f=1} END{exit !f}'
 }
 
+# Fast reachability probe: true iff host:port completes a TCP handshake within
+# PROBE_TIMEOUT (2s — see the note there for why not 1s). A black-holing endpoint
+# (the tailnet after a reboot, since Tailscale is down) fails here in 2s instead of
+# burning the full CONNECT_TIMEOUT on `adb connect`. Opens the socket without
+# writing — adbd ignores a bare connect. host:port is split on the LAST colon,
+# correct for the IPv4 endpoints this script uses; a bracketed IPv6 literal would
+# need different parsing.
+reachable() {
+  local host="${1%:*}" port="${1##*:}"
+  timeout "$PROBE_TIMEOUT" bash -c "exec 3<>/dev/tcp/$host/$port" 2>/dev/null
+}
+
 # Drop any network transport that answers adb but is provably a different device —
 # a stale PSG1_ADB_TARGETS entry pointing at a reassigned lease is the likely cause,
 # and is worth saying out loud rather than silently ignoring. Only a definite
@@ -112,6 +141,9 @@ discover() {
     wait
     ip="$(ip neigh show 2>/dev/null | awk -v m="$EXPECT_MAC" 'tolower($5)==tolower(m){print $1; exit}')"
     [ -n "$ip" ] || continue
+    # The MAC is in the ARP table so the host is up at L2, but adbd may not be
+    # listening yet (mid-boot) — probe before eating a 5s connect.
+    reachable "$ip:$ADB_PORT" || continue
     timeout "$CONNECT_TIMEOUT" adb connect "$ip:$ADB_PORT" >/dev/null 2>&1 || true
     if is_deck "$ip:$ADB_PORT"; then
       # Log to stderr: stdout is this function's return value. cron's 2>&1 still
@@ -130,12 +162,17 @@ read -r -a NET_TARGETS <<< "${PSG1_ADB_TARGETS:-}"
 connect_targets() {
   local t
   [ "${#NET_TARGETS[@]}" -gt 0 ] || return 0
-  # Bound it. An endpoint that black-holes rather than refusing makes a bare
-  # `adb connect` hang on TCP SYN retries for >2 min — and the tailnet endpoint
-  # black-holes in exactly the situation this script exists for, since Tailscale
-  # is down after a reboot. Unbounded, every tick burned minutes and cron piled
-  # the ticks up (observed 2026-07-15).
-  for t in "${NET_TARGETS[@]}"; do timeout "$CONNECT_TIMEOUT" adb connect "$t" >/dev/null 2>&1 || true; done
+  # Probe first, then connect. An endpoint that black-holes rather than refusing
+  # makes a bare `adb connect` hang on TCP SYN retries for >2 min — and the tailnet
+  # endpoint black-holes in exactly the situation this script exists for, since
+  # Tailscale is down after a reboot. The reachable() probe skips it in ~1s instead
+  # of paying the full CONNECT_TIMEOUT. `timeout` still wraps the connect as a
+  # backstop for the race where the port drops between probe and connect. Skips are
+  # silent — an unreachable tailnet post-reboot is normal, not worth a log line.
+  for t in "${NET_TARGETS[@]}"; do
+    reachable "$t" || continue
+    timeout "$CONNECT_TIMEOUT" adb connect "$t" >/dev/null 2>&1 || true
+  done
 }
 
 connect_targets
