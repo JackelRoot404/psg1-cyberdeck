@@ -376,13 +376,26 @@ targets (**found the deck in 2s**). Tailscale stayed down after unlock **both ti
 - ~~"Heals the deck after a reboot even undocked"~~ — see the unlock gate: impossible in principle,
   and it was also broken in practice (see the adb bugs below).
 
-**Tailscale does not auto-start after a reboot — it needs a manual open** (reproduced both boots;
-the 2026-07-16 recovery was confirmed a hand-open by the operator, not a delayed self-start).
-`tun0` has no address and the app isn't running afterward, despite the package being enabled and
-`always_on_vpn_app` set to it, and the unlock does not start it either. So the tailnet endpoint is
-a black hole after every reboot until someone opens the app on the deck — **do not rely on it for
-recovery; the LAN path is the one that comes up early.** Why "always-on VPN" doesn't actually start
-on boot here is unexplained (the setting is present but inert across boots).
+**Tailscale does not auto-start after a reboot — it needs a manual open** (reproduced both boots).
+`tun0` has no address and the app isn't running afterward, so the tailnet endpoint is a black hole
+after every reboot until someone opens the app — **do not rely on it for recovery; the LAN path is
+the one that comes up early.**
+
+**ROOT CAUSE (found 2026-07-17): always-on VPN is configured in the wrong Settings namespace.**
+Android reads/writes always-on VPN from **`Settings.Secure`** per-user — confirmed in AOSP
+`Vpn.java`: `loadAlwaysOnPackage()` reads `Settings.Secure.ALWAYS_ON_VPN_APP` and `startAlwaysOnVpn()`
+(run at boot) depends on it. On this deck `secure always_on_vpn_app` is **null**, while
+`global always_on_vpn_app` = `com.tailscale.ipn`. So the system has *no* always-on VPN armed and
+starts nothing at boot; the value only ever lived in `global`, which the VPN subsystem ignores.
+Tailscale holds VPN consent (`appops ACTIVATE_VPN: allow`) and its package is enabled, so if the
+setting were in the right namespace it would start on boot — the namespace is the whole problem.
+- **The keepalive has been writing the wrong namespace too** (`settings put global always_on_vpn_app`
+  at psg1_keepalive.sh ~L234), so its always-on re-assertion has been a silent no-op the whole time.
+- **Fix (one-time, robust):** on the deck, Settings → Network & internet → VPN → Tailscale (gear) →
+  enable **Always-on VPN**. That runs the full consent+Secure flow and persists across reboots.
+  `settings put secure always_on_vpn_app com.tailscale.ipn` may also work (consent is already
+  granted) but only takes effect at the next boot and bypasses the system's validation, so the UI
+  toggle is the reliable path. Not yet applied — needs an operator action + a reboot to verify.
 
 ### SvalGuard was misidentified (investigated 2026-07-16)
 
@@ -489,7 +502,7 @@ The explicit `PATH=` matters — cron's default environment is too bare to find 
 - Native solana-cli — see Solana section above; JS SDK is the supported path
 - **Identifying the boot-time disabler — reopened, and it almost certainly does not exist.** SvalGuard was misidentified (it's the Seed Vault key HAL; see "Reboot survival"). No vendor file references the kill-list packages, and **three** consecutive measured boots disabled nothing (n=3), each checked pre-unlock with `boot_completed=1` — the window a boot-time disabler would act in. The premise the keepalive was built on is unsupported. Not formally closed only because a negative can't be proven and the file search wasn't exhaustive, but at n=3 the keepalive is very likely solving a non-problem.
 - **The permanently-stuck offline adb transport is timing-dependent, and the `kill-server` fix is now verified in production.** It sticks only when adb connects *during* the boot window (adbd half-up), not after — Phase 1 stuck, Phase 2's fast 4s reboot didn't. On the n=3 reboot (2026-07-16) it was reproduced **deliberately** by spamming `adb connect` across the boot window: port open, transport wedged `offline`, plain `adb connect` returns "already connected" and never recovers. The keepalive then logged `stale offline transport(s) — restarting adb server` and **recovered it** — the one fix no prior reboot had exercised. Caveat: that recovery tick took **95s** (vs ~6s normal) because the payload block ran against a still-locked, freshly-booted device (slow adb calls, each bounded at `CMD_TIMEOUT`=15s) plus 2× the 5s black-holed-tailnet connect. Under the 240s cron backstop, non-stacking, but slow.
-- **Why "always-on VPN" (Tailscale) doesn't auto-start on boot** — needs a manual open, confirmed both reboots (the 2026-07-16 recovery was an operator hand-open). The setting is present but inert across boots; the tailnet endpoint is a black hole until someone opens the app. Unexplained.
+- **Why "always-on VPN" (Tailscale) doesn't auto-start on boot — SOLVED (2026-07-17):** the setting was written to `Settings.Global`, but Android reads always-on VPN from `Settings.Secure` (null here). See "Reboot survival". Fix = enable Always-on VPN via the deck's Settings UI (one-time); keepalive's `global` write should move to `secure` or be dropped. Not yet applied.
 - **Autonomous untethered post-reboot recovery — not achievable, closed.** The lock credential + FBE means Termux's storage and `BOOT_COMPLETED` are gated on a manual unlock, which no jumpbox can perform. Removing the lock credential would allow it, at an obvious opsec cost on a deck you carry. Not a bug; a platform property. (Both the docked and undocked reboot tests are now done — this is settled, not pending.)
 - DHCP reservation for the deck — not set (router at `192.168.2.1` serves DHCP; needs the operator's admin login). Discovery makes this non-critical, and the deck kept its lease across **all three** measured reboots anyway.
 - **The black-holed tailnet endpoint costs a fixed ~5s per keepalive tick after a reboot** (measured: a normal run is ~6s, of which 5s is `timeout 5 adb connect 100.64.30.85:5555` failing on the down tailnet; the LAN-only run is ~0.9s). Harmless but wasteful. A cheap fix: probe reachability (`timeout 1 bash -c 'echo >/dev/tcp/<host>/<port>'`) before each `adb connect` and skip unreachable targets — turns 5s into ~1s. Not done; would want a review + test pass like the other keepalive changes.
