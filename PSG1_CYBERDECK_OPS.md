@@ -391,11 +391,13 @@ Tailscale holds VPN consent (`appops ACTIVATE_VPN: allow`) and its package is en
 setting were in the right namespace it would start on boot — the namespace is the whole problem.
 - **The keepalive has been writing the wrong namespace too** (`settings put global always_on_vpn_app`
   at psg1_keepalive.sh ~L234), so its always-on re-assertion has been a silent no-op the whole time.
-- **Fix (one-time, robust):** on the deck, Settings → Network & internet → VPN → Tailscale (gear) →
-  enable **Always-on VPN**. That runs the full consent+Secure flow and persists across reboots.
-  `settings put secure always_on_vpn_app com.tailscale.ipn` may also work (consent is already
-  granted) but only takes effect at the next boot and bypasses the system's validation, so the UI
-  toggle is the reliable path. Not yet applied — needs an operator action + a reboot to verify.
+- **Fix APPLIED 2026-07-17:** the operator enabled **Always-on VPN** via Settings → Network &
+  internet → VPN → Tailscale (gear). `settings get secure always_on_vpn_app` now returns
+  `com.tailscale.ipn` (lockdown 0) — the correct namespace, written with consent. **Pending: a
+  reboot to confirm** Tailscale now auto-starts (it should; `startAlwaysOnVpn()` reads Secure at
+  boot). The leftover `global always_on_vpn_app` value is harmless (ignored namespace); clear with
+  `settings delete global always_on_vpn_app` if you want it tidy.
+- The keepalive's wrong-namespace write is being removed (drops the no-op) — see PR #18.
 
 ### SvalGuard was misidentified (investigated 2026-07-16)
 
