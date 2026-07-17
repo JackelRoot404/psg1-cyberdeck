@@ -398,7 +398,8 @@ setting were in the right namespace it would start on boot — the namespace is 
   reachable over the tailnet; the top activity was the launcher, **not** the Tailscale UI — i.e. the
   always-on VpnService started, not a manual open). Tailscale now comes up on its own after every
   reboot, gated only by the unlock like everything else. The leftover `global always_on_vpn_app`
-  value is harmless (ignored namespace); `settings delete global always_on_vpn_app` to tidy.
+  value was cleared 2026-07-17 (`settings delete global always_on_vpn_app`); the keepalive no longer
+  writes it (PR #18), so it stays gone.
 - The keepalive's wrong-namespace write was removed (PR #18, merged).
 
 ### SvalGuard was misidentified (investigated 2026-07-16)
