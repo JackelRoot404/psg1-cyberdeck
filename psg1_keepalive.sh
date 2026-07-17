@@ -221,19 +221,13 @@ for pkg in "${PACKAGES[@]}"; do
   fi
 done
 
-# Restore always-on VPN if it was cleared.
-# The [ -n ] guard matters: a healthy read of an unset key returns the literal
-# "null", never empty. Empty means the read FAILED — most likely the `settings`
-# service isn't bound yet, which is the normal state in the post-reboot window this
-# script exists for (adbd answers getprop long before system_server is up). Without
-# the guard, "" != "com.tailscale.ipn" is true and we log a restore that never
-# happened, then issue a write that also fails.
-aov="$("${ADB[@]}" shell 'settings get global always_on_vpn_app' 2>/dev/null | tr -d '\r')"
-if [ -n "$aov" ] && [ "$aov" != "com.tailscale.ipn" ]; then
-  echo "[$ts] restoring always-on VPN (was: $aov)"
-  "${ADB[@]}" shell "settings put global always_on_vpn_app com.tailscale.ipn" >/dev/null
-  needed_action=1
-fi
+# Always-on VPN is deliberately NOT managed here. It was writing Settings.Global,
+# but Android reads always-on VPN from Settings.Secure (per-user) — confirmed in
+# AOSP Vpn.java — so the write was a silent no-op the whole time and never armed
+# anything (which is why Tailscale never auto-started after a reboot). Enable it
+# once on the deck via Settings -> Network & internet -> VPN -> Tailscale -> Always-
+# on VPN; that writes Secure with the proper consent and persists across reboots on
+# its own. See PSG1_CYBERDECK_OPS.md "Reboot survival". Nothing to re-assert here.
 
 # Restore private DNS to opportunistic if it got changed.
 # IMPORTANT: don't use strict DoT (e.g. one.one.one.one) while Tailscale is
