@@ -1,5 +1,5 @@
 root    ::= "{" ws "\"tool\"" ws ":" ws tool ws "," ws "\"args\"" ws ":" ws args ws "}"
-tool    ::= "\"get_battery\"" | "\"toggle_wifi\"" | "\"set_brightness\"" | "\"open_app\"" | "\"get_status\""
+tool    ::= "\"get_battery\"" | "\"toggle_wifi\"" | "\"set_brightness\"" | "\"open_app\"" | "\"get_status\"" | "\"toggle_bluetooth\"" | "\"set_volume\"" | "\"lock_screen\"" | "\"take_screenshot\"" | "\"go_home\"" | "\"media_control\""
 args    ::= "{" ws ( member ( ws "," ws member )* )? ws "}"
 member  ::= string ws ":" ws val
 val     ::= string | int
