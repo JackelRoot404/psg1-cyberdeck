@@ -49,7 +49,7 @@ Idempotent — safe to run any time. Updates packages, fixes config drift, re-ad
   claude --version
   ```
   If `2.1.112` has aged out of the registry, run `npm view @anthropic-ai/claude-code versions` and pick the highest `2.1.11x` **below 113**.
-- **Stop the silent re-break.** `export DISABLE_AUTOUPDATER=1` (added to `~/.bashrc` by the setup script) keeps the in-app updater from pulling a native build behind your back. Also don't run `npm update -g @anthropic-ai/claude-code`.
+- **Stop the silent re-break.** `export DISABLE_AUTOUPDATER=1` keeps the in-app updater from pulling a native build behind your back. **NB (2026-07-18): it is NOT actually persisted on the deck** — there is no `~/.bashrc`/`~/.bash_profile`/`~/.profile` at all, and `DISABLE_AUTOUPDATER` is unset. Add it to a real startup file (or `~/.termux/boot/`) if you want it to stick. Also don't run `npm update -g @anthropic-ai/claude-code`.
 - **Current-version path (glibc via chroot).** To run an up-to-date Claude Code, install it inside the Ubuntu chroot, where glibc is available:
   ```sh
   proot-distro login ubuntu
@@ -329,9 +329,10 @@ Restore (push a file to the device, then run in Termux):
 ### The unlock gate (measured — this dominates everything)
 
 The deck has a **lock credential** and file-based encryption (`ro.crypto.type=file`). Termux
-is **not** direct-boot aware, so its home — including the `~/.bashrc` sshd guard — lives in
-credential-encrypted storage that does not exist until the first manual unlock. `BOOT_COMPLETED`
-is likewise withheld until then. Check with `getprop sys.user.0.ce_available` and
+is **not** direct-boot aware, so its home — including the sshd guard (the Termux:Boot script
+`~/.termux/boot/start-sshd.sh`, which runs `termux-wake-lock; sshd`) — lives in credential-encrypted
+storage that does not exist until the first manual unlock. `BOOT_COMPLETED` is likewise withheld
+until then. Check with `getprop sys.user.0.ce_available` and
 `dumpsys user | grep RUNNING_UNLOCKED` (**not** `ls /data/user/0/com.termux` — the shell gets
 "Permission denied" whether locked or not, so that probe reads "locked" always and proves nothing).
 
@@ -484,7 +485,7 @@ head -3 ~/bin/psg1_keepalive.sh       # what's actually running, and from where
 1. **Stale transports are permanent.** After the deck reboots, its TCP transport goes `offline` and stays there. `adb connect` answers *"already connected"*; `adb disconnect` + `adb connect` answers the same; `adb reconnect offline` says *"reconnecting"* and changes nothing. **Only `adb kill-server` clears it.** The keepalive's own connects during the boot window create these, so every real reboot poisoned the server and the network path silently did nothing, forever. The script now restarts the adb server when nothing live is found but offline entries exist.
 2. **`adb connect` hangs >2 min** on an address that black-holes rather than refusing — exactly the tailnet endpoint's post-reboot state. Every tick burned minutes and cron stacked them. All connects are now bounded (`PSG1_CONNECT_TIMEOUT`, default 5s), and cron wraps the script in `timeout 240` as a backstop.
 
-**Field recovery is the real answer.** You have to unlock the deck by hand anyway, so: unlock → if sshd isn't back in ~15s, Settings → Apps → enable **Termux** → open it (`~/.bashrc` restarts sshd) → open **Tailscale**, Connect. Keeping the deck charged avoids the involuntary reboot that starts all this.
+**Field recovery is the real answer.** You have to unlock the deck by hand anyway, so: unlock → Termux:Boot runs `~/.termux/boot/start-sshd.sh` and sshd is back in ~15s → if it isn't, open **Termux** and run `sshd` by hand → open **Tailscale**, Connect. Keeping the deck charged avoids the involuntary reboot that starts all this. (Opening Termux does **not** itself restart sshd — there is no `~/.bashrc`; recovery is the Termux:Boot script or a manual `sshd`.)
 
 **Finding the deck (three steps).** The keepalive locates the deck in this order, so a moved lease isn't fatal:
 1. **USB** — auto-detected whenever docked, and preferred when present.
