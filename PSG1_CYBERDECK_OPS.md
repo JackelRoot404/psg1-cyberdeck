@@ -79,6 +79,38 @@ It pushes, runs `pm install -r -i com.playsolana.echos`, and cleans up. For spli
   1. Open Shizuku app → tap "Start"
   2. Set up the ADB-over-WiFi pairing trick once and let Shizuku auto-start
 
+## Local AI assistant (on-device, no cloud)
+
+A natural-language device controller lives in `~/psg1-assistant/` (full detail in that folder's
+`README.md`). It maps plain-English commands to real device actions. Everything runs on the deck —
+nothing is sent to any cloud.
+
+- **Text mode:** `psg1` (alias) → type e.g. `set brightness to 30 percent`, `turn wifi off`,
+  `what's the battery`. Model loads once (~1.5s), then ~4–5s/command.
+- **Voice mode (fully offline):** `psg1-voice` → press Enter, speak a command (~4s), it runs.
+  Round-trip ~6–8s. **Your voice never leaves the deck.**
+
+Pipeline:
+
+```
+(voice) mic → termux-microphone-record (aac 16kHz mono) → ffmpeg (→16kHz mono WAV)
+             → whisper.cpp whisper-cli + ggml-base.en.bin        [speech → text]
+(text)  → Qwen2.5-1.5B-Instruct Q4_0 via llama-cpp-python + GBNF grammar   [text → tool JSON]
+        → executor.py: 11 allowlisted rish tools, validated args           [action]
+```
+
+- **Tools (11):** get_battery, toggle_wifi, set_brightness, open_app, get_status, toggle_bluetooth,
+  set_volume, lock_screen, take_screenshot, go_home, media_control. The model never gets a raw shell —
+  each tool is a fixed `rish` command with validated enum/int args; unknown tools / out-of-range args
+  are rejected before execution.
+- **Depends on:** Shizuku running (the `rish` executor, see above), plus for voice: `pkg install
+  termux-api` + mic permission, `ffmpeg`, and whisper.cpp built at `~/whisper.cpp`.
+- **Gotchas worth knowing:** `llama-cli`/`llama-server` **segfault** on this device — the assistant
+  drives the model through the Python bindings (`llama-cpp-python`) instead. whisper.cpp is built
+  **from source** (`whisper-cli` runs fine and does *not* segfault; `pywhispercpp`'s pip build fails).
+  Not committed to the repo (provide locally): the `*.gguf` weights, the Shizuku `rish`/dex, the
+  whisper.cpp build + `ggml-base.en.bin`.
+
 ## Network
 
 - **Tailscale owns the VPN slot** (NetGuard intentionally not enabled — Android only allows one VPN slot)
