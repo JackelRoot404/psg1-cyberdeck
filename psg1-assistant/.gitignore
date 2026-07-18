@@ -4,3 +4,5 @@ rish_shizuku.dex  # extracted from the Shizuku APK
 *.gguf            # model weights — download separately
 *.out             # test/run output logs
 __pycache__/
+rec.*             # voice recording scratch (m4a/wav)
+jfk.wav           # whisper test sample (download separately)

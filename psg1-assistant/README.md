@@ -38,3 +38,18 @@ go_home · media_control{play/pause/next/previous}
 - 1.5B is fluent but limited — reliable for these constrained intents, not open Q&A.
 - Not committed (provide locally): rish/rish_shizuku.dex (from the Shizuku APK), *.gguf, run logs.
 - Patched: llama_cpp/_ctypes_extensions.py maps sys.platform=="android" -> .so loader (py3.13+).
+
+## Voice mode (fully offline)
+
+    psg1-voice        # or: python3 ~/psg1-assistant/voice.py
+    (press Enter, speak a command ~4s, it runs)
+
+Pipeline, all on-device — **your voice never leaves the deck**:
+mic (`termux-microphone-record`, aac 16kHz mono) → `ffmpeg` (→16kHz mono WAV) →
+**whisper.cpp** `whisper-cli` + `ggml-base.en.bin` (STT) → the 1.5B+grammar+executor above.
+
+Round-trip ~6-8s (record 4s + whisper ~1-2s + assistant ~4s). Needs (provide locally,
+not committed): whisper.cpp built at ~/whisper.cpp (whisper-cli), ggml-base.en.bin,
+termux-api (`pkg install termux-api`) + mic permission, and ffmpeg.
+whisper.cpp source built here because pywhispercpp's pip build fails; whisper-cli runs
+fine (unlike llama-cli, which segfaults on this device).
