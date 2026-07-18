@@ -1,0 +1,8 @@
+root    ::= "{" ws "\"tool\"" ws ":" ws tool ws "," ws "\"args\"" ws ":" ws args ws "}"
+tool    ::= "\"get_battery\"" | "\"toggle_wifi\"" | "\"set_brightness\"" | "\"open_app\"" | "\"get_status\""
+args    ::= "{" ws ( member ( ws "," ws member )* )? ws "}"
+member  ::= string ws ":" ws val
+val     ::= string | int
+string  ::= "\"" [a-zA-Z0-9_ ]* "\""
+int     ::= [0-9]+
+ws      ::= [ \t\n]*
