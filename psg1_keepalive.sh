@@ -240,17 +240,12 @@ if [ -n "$pdm" ] && [ "$pdm" != "opportunistic" ] && [ "$pdm" != "off" ]; then
   needed_action=1
 fi
 
-# Bring Termux sshd back up after a reboot. Termux:Boot is skipped when the
-# package is disabled during the boot window, so once com.termux is enabled we
-# cold-start it: the fresh login session sources ~/.bashrc, whose guard line
-# (re)starts sshd. Only acts when sshd is actually down, so steady state is a no-op.
-tstate="$("${ADB[@]}" shell "dumpsys package com.termux 2>/dev/null | grep -m1 'enabled=' | grep -oE 'enabled=[0-9]'" 2>/dev/null | tr -d '\r')"
-sshd_listen="$("${ADB[@]}" shell 'ss -ltn 2>/dev/null | grep :8022' 2>/dev/null | tr -d '\r')"
-if [ "$tstate" = "enabled=1" ] && [ -z "$sshd_listen" ]; then
-  echo "[$ts] Termux sshd not listening — cold-starting Termux so its ~/.bashrc guard restarts sshd"
-  "${ADB[@]}" shell 'input keyevent KEYCODE_WAKEUP; am start -n com.termux/.app.TermuxActivity' >/dev/null 2>&1
-  needed_action=1
-fi
+# sshd recovery is deliberately NOT attempted here. It's handled by the Termux:Boot
+# script ~/.termux/boot/start-sshd.sh (`termux-wake-lock; sshd`), which runs after
+# the manual unlock — the 2026-07-15/16 reboot tests confirmed that exact path.
+# A previous block here did `am start` on Termux "so its ~/.bashrc guard restarts
+# sshd", but there is no ~/.bashrc on the deck and opening the app doesn't run boot
+# scripts, so it was a no-op for sshd. Removed 2026-07-18.
 
 if [ $needed_action -eq 0 ]; then
   exit 0  # silent on no-op so the log doesn't fill up
